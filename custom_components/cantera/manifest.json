@@ -1,0 +1,13 @@
+{
+  "domain": "cantera",
+  "name": "CANtera OBD-II",
+  "version": "0.1.0",
+  "documentation": "https://github.com/your-org/cantera-ha",
+  "issue_tracker": "https://github.com/your-org/cantera-ha/issues",
+  "codeowners": [],
+  "requirements": [],
+  "dependencies": [],
+  "after_dependencies": ["recorder"],
+  "iot_class": "local_push",
+  "config_flow": true
+}
