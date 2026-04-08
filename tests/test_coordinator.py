@@ -200,3 +200,133 @@ def test_reading_listener_called(coordinator):
     for listener in coordinator._listeners:
         listener(reading)
     cb.assert_called_once_with(reading)
+
+
+# ---------- _backfill_history ----------
+
+def _make_mock_session(status: int, json_return=None, get_side_effect=None):
+    """Build a minimal aiohttp session mock for _backfill_history tests."""
+    mock_resp = AsyncMock()
+    mock_resp.status = status
+    if json_return is not None:
+        mock_resp.json = AsyncMock(return_value=json_return)
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+    mock_session = AsyncMock()
+    if get_side_effect is not None:
+        mock_session.get = MagicMock(side_effect=get_side_effect)
+    else:
+        mock_session.get = MagicMock(return_value=mock_resp)
+    return mock_session
+
+
+async def test_backfill_history_200_imports_stats_and_saves(coordinator):
+    """200 response: import_statistics and _save_last_sync are called."""
+    readings = [
+        {
+            "pid": "Engine RPM",
+            "ts": 1700000000000,
+            "timestamp_ms": 1700000000000,
+            "value": 2000.0,
+            "unit": "rpm",
+        }
+    ]
+    mock_session = _make_mock_session(200, json_return=readings)
+
+    with patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0):
+        with patch(
+            "custom_components.cantera.coordinator.import_statistics",
+            new_callable=AsyncMock,
+        ) as mock_import:
+            with patch.object(coordinator, "_save_last_sync", new_callable=AsyncMock) as mock_save:
+                await coordinator._backfill_history(mock_session)
+
+    mock_import.assert_awaited_once()
+    mock_save.assert_awaited_once_with(1700000000000)
+
+
+async def test_backfill_history_404_logs_warning_and_returns(coordinator):
+    """Non-200 response: import_statistics is NOT called."""
+    mock_session = _make_mock_session(404)
+
+    with patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0):
+        with patch(
+            "custom_components.cantera.coordinator.import_statistics",
+            new_callable=AsyncMock,
+        ) as mock_import:
+            await coordinator._backfill_history(mock_session)
+
+    mock_import.assert_not_awaited()
+
+
+async def test_backfill_history_exception_does_not_propagate(coordinator):
+    """Any exception inside _backfill_history is caught and logged, never propagated."""
+    mock_session = _make_mock_session(200, get_side_effect=RuntimeError("network failure"))
+
+    with patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0):
+        # Must not raise
+        await coordinator._backfill_history(mock_session)
+
+
+async def test_backfill_history_empty_readings_skips_import(coordinator):
+    """Empty readings list: import_statistics and _save_last_sync are NOT called."""
+    mock_session = _make_mock_session(200, json_return=[])
+
+    with patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0):
+        with patch(
+            "custom_components.cantera.coordinator.import_statistics",
+            new_callable=AsyncMock,
+        ) as mock_import:
+            with patch.object(coordinator, "_save_last_sync", new_callable=AsyncMock) as mock_save:
+                await coordinator._backfill_history(mock_session)
+
+    mock_import.assert_not_awaited()
+    mock_save.assert_not_awaited()
+
+
+# ---------- _load_last_sync ----------
+
+async def test_load_last_sync_returns_zero_when_store_is_empty(coordinator):
+    """_load_last_sync returns 0 when the store has no data."""
+    with patch.object(coordinator._store, "async_load", AsyncMock(return_value=None)):
+        result = await coordinator._load_last_sync()
+    assert result == 0
+
+
+async def test_load_last_sync_returns_stored_timestamp(coordinator):
+    """_load_last_sync returns the ts value from storage."""
+    with patch.object(coordinator._store, "async_load", AsyncMock(return_value={"ts": 123456})):
+        result = await coordinator._load_last_sync()
+    assert result == 123456
+
+
+# ---------- _save_last_sync ----------
+
+async def test_save_last_sync_persists_timestamp(coordinator):
+    """_save_last_sync writes {ts: ts_ms} to the store."""
+    with patch.object(coordinator._store, "async_save", AsyncMock()) as mock_save:
+        await coordinator._save_last_sync(999000)
+    mock_save.assert_awaited_once_with({"ts": 999000})
+
+
+# ---------- SSE reconnect loop ----------
+
+async def test_sse_loop_reconnects_after_exception(coordinator):
+    """When _connect_and_stream raises, _connected is set False and the loop retries."""
+    iterations = 0
+
+    async def fake_connect():
+        nonlocal iterations
+        iterations += 1
+        if iterations == 1:
+            raise RuntimeError("SSE dropped")
+        # Exit cleanly on the second iteration via CancelledError handler
+        raise asyncio.CancelledError()
+
+    with patch.object(coordinator, "_connect_and_stream", side_effect=fake_connect):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await coordinator._sse_loop()
+
+    assert coordinator._connected is False
+    assert iterations == 2

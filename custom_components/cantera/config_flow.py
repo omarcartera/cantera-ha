@@ -5,7 +5,6 @@ from enum import Enum
 
 import aiohttp
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 
@@ -43,13 +42,12 @@ async def _test_connection(host: str, port: int) -> ConnectionResult:
     """
     url = f"http://{host}:{port}{HEALTH_ENDPOINT}"
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url, timeout=aiohttp.ClientTimeout(connect=5, total=5)
-            ) as resp:
-                if resp.status == 200:
-                    return ConnectionResult.OK
-                return ConnectionResult.CANNOT_CONNECT
+        async with aiohttp.ClientSession() as session, session.get(
+            url, timeout=aiohttp.ClientTimeout(connect=5, total=5)
+        ) as resp:
+            if resp.status == 200:
+                return ConnectionResult.OK
+            return ConnectionResult.CANNOT_CONNECT
     except aiohttp.ClientConnectorError as exc:
         os_err = getattr(exc, "os_error", None)
         if os_err is not None:
@@ -69,12 +67,11 @@ async def _get_device_info(host: str, port: int) -> dict | None:
     """Fetch /api/device for stable identity. Returns None if not available."""
     url = f"http://{host}:{port}{DEVICE_ENDPOINT}"
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url, timeout=aiohttp.ClientTimeout(connect=5, total=5)
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.json()
+        async with aiohttp.ClientSession() as session, session.get(
+            url, timeout=aiohttp.ClientTimeout(connect=5, total=5)
+        ) as resp:
+            if resp.status == 200:
+                return await resp.json()
     except Exception:
         pass
     return None

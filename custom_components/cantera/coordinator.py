@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 import aiohttp
-
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
@@ -71,10 +71,8 @@ class CanteraCoordinator:
 
     def remove_connection_listener(self, cb: Callable[[], None]) -> None:
         """Remove a connection state change callback."""
-        try:
+        with contextlib.suppress(ValueError):
             self._connection_listeners.remove(cb)
-        except ValueError:
-            pass
 
     def _set_connected(self, value: bool) -> None:
         """Update connection state and notify listeners."""
@@ -89,10 +87,8 @@ class CanteraCoordinator:
 
     def remove_reading_listener(self, cb: Callable[[dict], None]) -> None:
         """Remove a previously registered reading callback."""
-        try:
+        with contextlib.suppress(ValueError):
             self._listeners.remove(cb)
-        except ValueError:
-            pass
 
     # ------------------------------------------------------------------
     # Public API — Health polling
@@ -114,10 +110,8 @@ class CanteraCoordinator:
 
     def remove_health_listener(self, cb: Callable[[dict], None]) -> None:
         """Remove a health poll callback."""
-        try:
+        with contextlib.suppress(ValueError):
             self._health_listeners.remove(cb)
-        except ValueError:
-            pass
 
     def _notify_health_listeners(self) -> None:
         for cb in self._health_listeners:
@@ -147,10 +141,8 @@ class CanteraCoordinator:
         self._api_reachable = False
         if self._sse_task:
             self._sse_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._sse_task
-            except asyncio.CancelledError:
-                pass
             self._sse_task = None
 
     # ------------------------------------------------------------------
@@ -161,17 +153,16 @@ class CanteraCoordinator:
         """Poll /api/health and update reachability state."""
         url = f"{self._base_url}{HEALTH_ENDPOINT}"
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=3)
-                ) as resp:
-                    if resp.status == 200:
-                        self._health_data = await resp.json()
-                        self._consecutive_health_failures = 0
-                        if not self._api_reachable:
-                            self._api_reachable = True
-                        self._notify_health_listeners()
-                        return
+            async with aiohttp.ClientSession() as session, session.get(
+                url, timeout=aiohttp.ClientTimeout(total=3)
+            ) as resp:
+                if resp.status == 200:
+                    self._health_data = await resp.json()
+                    self._consecutive_health_failures = 0
+                    if not self._api_reachable:
+                        self._api_reachable = True
+                    self._notify_health_listeners()
+                    return
         except Exception:
             pass
 
@@ -245,7 +236,7 @@ class CanteraCoordinator:
         """Fetch /api/history for the gap since last sync, import stats."""
         try:
             last_sync_ms = await self._load_last_sync()
-            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            now_ms = int(datetime.now(UTC).timestamp() * 1000)
 
             history_url = (
                 f"{self._base_url}{HISTORY_ENDPOINT}"
