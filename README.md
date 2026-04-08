@@ -1,47 +1,66 @@
-# CANtera OBD-II — Home Assistant Integration
+# 🚗 CANtera OBD-II — Home Assistant Integration
 
-A custom Home Assistant integration that connects to a
-[CANtera](https://github.com/your-org/cantera) OBD-II logger running on a
-Raspberry Pi and streams live vehicle data into HA sensor entities.
+[![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
+[![HA Minimum Version](https://img.shields.io/badge/HA%20minimum-2023.6.0-blue.svg)](https://www.home-assistant.io)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org)
 
----
-
-## Features
-
-- **Live OBD sensors** — auto-created for every PID the ECU supports
-  (RPM, speed, coolant temp, throttle, fuel level, …)
-- **History backfill** — on reconnect, imports any missed readings into HA
-  long-term statistics so your graphs stay complete
-- **Zero broker** — connects directly to CANtera's built-in HTTP API; no
-  Mosquitto or MQTT setup required
-- **HACS compatible** — install from the HACS custom repository list
+> Live vehicle diagnostics in Home Assistant — stream OBD-II PID readings from
+> a Raspberry Pi directly into your dashboard with no MQTT broker required.
 
 ---
 
-## Prerequisites
+## ✨ Features
 
-| Component | Notes |
-|-----------|-------|
-| **Raspberry Pi** | Running CANtera with an OBD-II CAN adapter |
-| **Tailscale** (recommended) | Gives the Pi a stable IP reachable from your HA instance |
+| Feature | Details |
+|---------|---------|
+| 🚀 **Live OBD sensors** | Auto-created for every PID the ECU supports — RPM, speed, coolant temp, throttle, fuel level, and more |
+| 📊 **History backfill** | On reconnect, fetches missed readings from the Pi's Parquet logs and imports them into HA long-term statistics |
+| ❤️ **Health heartbeat** | Polls `/api/health` every 5 s — connection sensors go offline within 10 s of the Pi losing power |
+| 🔌 **CAN status sensor** | Dedicated binary sensor showing whether the OBD link to the vehicle ECU is active |
+| 🚫 **Zero broker** | Connects directly to CANtera's built-in HTTP/SSE API — no MQTT, no Mosquitto |
+| 📦 **HACS compatible** | One-click install from the HACS custom repository list |
+
+---
+
+## 🚀 Quick Start
+
+1. **Deploy** CANtera on a Raspberry Pi with an OBD-II CAN adapter
+2. **Start** the logger: `cantera -b 500000 log-obd --api`
+3. **Add** the integration in HA → Settings → Devices & Services → CANtera
+
+---
+
+## 📋 Prerequisites
+
+| Component | Requirement |
+|-----------|-------------|
+| **Raspberry Pi** | Running CANtera with an OBD-II CAN adapter attached |
+| **Network** | Pi reachable from the Home Assistant host (same LAN, or VPN with routing) |
 | **Home Assistant** | 2023.6.0 or later |
-| **HACS** | For one-click installation (optional — manual install also works) |
+| **HACS** | For one-click installation (manual install also works) |
+
+> **⚠️ Tailscale note**: Tailscale IPs (`100.x.x.x`) are **not** accessible from
+> the HA Docker container by default. Use the Pi's **local network IP** (e.g.
+> `192.168.x.x`). Tailscale routing requires the Tailscale add-on with subnet
+> routing enabled in Home Assistant — otherwise the connection will be refused.
 
 ---
 
-## Pi Setup
+## 🔧 Pi Setup
 
-SSH into the Pi and start CANtera with the API server enabled:
+### Run manually
 
 ```bash
-cantera log-obd --api
+# Replace 500000 with your adapter's actual bitrate if different.
+cantera -b 500000 log-obd --api
 ```
 
-> `--api` enables the built-in HTTP API server on port 8088 (default), exposing
-> three endpoints: `/events` (SSE), `/api/history`, and `/api/last-sync`.
-> To use a different port: `cantera log-obd --api --api-port 9000`.
+`--api` starts the built-in HTTP server on port **8088** (default).
 
-To run as a systemd service, create `/etc/systemd/system/cantera-obd.service`:
+### Run as a systemd service (recommended)
+
+Create `/etc/systemd/system/cantera-obd.service`:
 
 ```ini
 [Unit]
@@ -49,25 +68,29 @@ Description=CANtera OBD-II logger
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/cantera log-obd --api
-Restart=on-failure
-RestartSec=10s
-User=pi
+ExecStart=/usr/local/bin/cantera -b 500000 log-obd --api
+Restart=always
+RestartSec=5s
+User=omar
 
 [Install]
 WantedBy=multi-user.target
 ```
 
+> `Restart=always` ensures the service restarts if the CAN adapter is
+> disconnected or the vehicle is turned off — CANtera will keep retrying.
+
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now cantera-obd
+sudo systemctl status cantera-obd
 ```
 
 ---
 
-## Installation
+## 📦 Installation
 
-### Option A: HACS (recommended)
+### HACS (recommended)
 
 1. Open HACS in Home Assistant
 2. Go to **Integrations → ⋮ → Custom repositories**
@@ -75,11 +98,10 @@ sudo systemctl enable --now cantera-obd
 4. Search for **CANtera OBD-II** and click **Install**
 5. Restart Home Assistant
 
-### Option B: Manual
-
-Copy the `custom_components/cantera/` directory into your HA config directory:
+### Manual
 
 ```bash
+# Run from your HA config directory
 cp -r custom_components/cantera/ /config/custom_components/cantera/
 ```
 
@@ -87,48 +109,89 @@ Restart Home Assistant.
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
-1. Go to **Settings → Devices & Services → + Add Integration**
+1. **Settings → Devices & Services → + Add Integration**
 2. Search for **CANtera**
-3. Enter the Pi's IP address (Tailscale IP recommended) and port (default 8088)
-4. The integration validates the connection and creates a config entry
+3. Enter the Pi's **local network IP** and port (default: `8088`)
+4. Click Submit — the integration tests `/api/health` and creates the config entry
 
 ---
 
-## What to Expect
+## 📊 Entities
 
-After setup, sensor entities are **created automatically** as readings arrive:
+### Binary Sensors
 
-| Entity ID | Friendly Name | Unit |
-|-----------|---------------|------|
-| `sensor.cantera_engine_rpm` | Engine RPM | rpm |
-| `sensor.cantera_vehicle_speed` | Vehicle speed | km/h |
-| `sensor.cantera_engine_coolant_temperature` | Engine coolant temperature | °C |
-| `sensor.cantera_throttle_position` | Throttle position | % |
-| `sensor.cantera_fuel_tank_level_input` | Fuel tank level input | % |
+| Entity | Friendly Name | Description |
+|--------|---------------|-------------|
+| `binary_sensor.cantera_api_connection` | API Connection | `ON` when the Pi's HTTP API responds to health checks |
+| `binary_sensor.cantera_can_connection` | CAN Connection | `ON` when the OBD polling loop is actively communicating with the vehicle ECU |
 
-Device classes (temperature, speed, voltage, pressure) are assigned
-automatically, enabling HA unit conversion and long-term statistics.
+### OBD Sensors (auto-created)
 
-On every reconnect, the integration fetches historical readings from the
-Pi's Parquet log files and imports them as HA statistics — so your
-history graphs stay complete even if HA was offline.
+Sensor entities are created automatically as readings arrive from the ECU.
+Common examples:
 
----
+| Entity ID | Friendly Name | Unit | HA Device Class |
+|-----------|---------------|------|-----------------|
+| `sensor.cantera_engine_rpm` | Engine RPM | rpm | — |
+| `sensor.cantera_vehicle_speed` | Vehicle speed | km/h | speed |
+| `sensor.cantera_engine_coolant_temperature` | Engine coolant temperature | °C | temperature |
+| `sensor.cantera_throttle_position` | Throttle position | % | — |
+| `sensor.cantera_fuel_tank_level_input` | Fuel tank level input | % | — |
+| `sensor.cantera_control_module_voltage` | Control module voltage | V | voltage |
 
-## Troubleshooting
-
-| Symptom | Fix |
-|---------|-----|
-| **"cannot_connect" error** | Verify the Pi is reachable: `curl http://PI_IP:8088/events` should stream SSE data |
-| **No entities appear** | Entities are created on the first reading. Start the engine or turn the ignition on. |
-| **Connection drops frequently** | Check network stability between HA and the Pi. Tailscale is recommended for reliable connectivity. |
-| **Wrong port** | Use `--api-port <N>` when starting CANtera and enter the same port in the HA config flow (default: 8088) |
-| **History not importing** | Check HA logs for "History backfill failed". The Pi must have Parquet files in the log directory. |
+> Entities appear after the **first reading** from the ECU — start the engine
+> or turn the ignition to accessory mode to trigger discovery.
 
 ---
 
-## License
+## 🏗️ Architecture
+
+```
+  Raspberry Pi                          Home Assistant
+  ┌──────────────────────────┐          ┌────────────────────────────────┐
+  │  cantera -b 500000       │          │  CANtera Integration           │
+  │  log-obd --api           │          │                                │
+  │                          │  HTTP    │  coordinator.py                │
+  │  ┌────────────────────┐  │◄────────►│  ├─ SSE loop (live readings)  │
+  │  │  /events  (SSE)    │  │          │  ├─ health poll (5 s)         │
+  │  │  /api/health       │  │          │  └─ history backfill          │
+  │  │  /api/history      │  │          │                                │
+  │  │  /api/device       │  │          │  Sensors / Binary Sensors      │
+  │  └────────────────────┘  │          └────────────────────────────────┘
+  │                          │
+  │  OBD-II CAN adapter      │
+  │  ISO-TP ↔ ECU            │
+  └──────────────────────────┘
+```
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/events` | GET (SSE) | Live OBD readings stream |
+| `/api/health` | GET | Service health + `can_connected` flag (polled every 5 s) |
+| `/api/history` | GET | Parquet-backed historical readings for backfill |
+| `/api/device` | GET | Device identity (used as HA unique ID) |
+
+---
+
+## 🔍 Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| **"host_unreachable"** in config flow | Routing failure | Use the Pi's local IP (`192.168.x.x`). Tailscale IPs require the HA Tailscale add-on with subnet routing |
+| **"connection_refused"** in config flow | CANtera not running | SSH to Pi and run `cantera -b 500000 log-obd --api`, or check `systemctl status cantera-obd` |
+| **"cannot_connect"** in config flow | API not responding | Verify port — default is 8088. Check firewall. Try `curl http://PI_IP:8088/api/health` |
+| **No OBD sensors appear** | ECU not polled yet | Entities are created on first reading. Turn ignition on or start the engine |
+| **API Connection sensor goes ON then OFF** | CAN adapter not found | Check `journalctl -u cantera-obd` — adapter may not be detected. Specify `--device` flag if needed |
+| **CAN Connection stays OFF** | Vehicle not responding | ECU may be off. The sensor reflects live OBD frame exchange — it goes ON once the ECU starts responding |
+| **History not importing** | No Parquet files on Pi | Check that `cantera -b 500000 log-obd --api` ran long enough to write a log segment |
+| **Icon not showing in HACS** | Stale cache | Clear browser cache or reload HACS |
+
+---
+
+## 📄 License
 
 MIT
