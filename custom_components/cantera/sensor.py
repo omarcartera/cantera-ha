@@ -12,8 +12,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
-
 from .const import (
     DEVICE_IDENTIFIER,
     DEVICE_MANUFACTURER,
@@ -62,14 +60,15 @@ async def async_setup_entry(
     coordinator.add_reading_listener(_on_reading)
 
 
-class CanteraSensor(CoordinatorEntity, SensorEntity):
+class CanteraSensor(SensorEntity):
     """A single OBD PID sensor entity."""
 
     def __init__(
         self, coordinator: CanteraCoordinator, initial_reading: dict
     ) -> None:
         """Initialise from the first reading for this PID."""
-        super().__init__(coordinator)
+        super().__init__()
+        self._coordinator = coordinator
         pid_name: str = initial_reading["pid"]
         unit: str = initial_reading.get("unit", "")
         slug = pid_name.lower().replace(" ", "_")
@@ -98,6 +97,11 @@ class CanteraSensor(CoordinatorEntity, SensorEntity):
 
         self._slug = slug
         coordinator.add_reading_listener(self._handle_reading)
+
+    @property
+    def should_poll(self) -> bool:
+        """Disable polling — updates arrive via SSE callbacks."""
+        return False
 
     @callback
     def _handle_reading(self, reading: dict) -> None:
