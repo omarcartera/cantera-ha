@@ -5,7 +5,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import DOMAIN, DEFAULT_PORT, CONF_HOST, CONF_PORT, SSE_ENDPOINT
+from .const import DOMAIN, DEFAULT_PORT, CONF_HOST, CONF_PORT, SSE_ENDPOINT, DEVICE_ENDPOINT
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -28,6 +28,21 @@ async def _test_connection(host: str, port: int) -> bool:
         return False
 
 
+async def _get_device_info(host: str, port: int) -> dict | None:
+    """Fetch /api/device for stable identity. Returns None if not available."""
+    url = f"http://{host}:{port}{DEVICE_ENDPOINT}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, timeout=aiohttp.ClientTimeout(connect=5, total=5)
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+    except Exception:
+        pass
+    return None
+
+
 class CanteraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for CANtera."""
 
@@ -40,8 +55,14 @@ class CanteraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             host = user_input[CONF_HOST]
             port = user_input[CONF_PORT]
             if await _test_connection(host, port):
-                await self.async_set_unique_id(f"{host}:{port}")
-                self._abort_if_unique_id_configured()
+                # Try to get a stable device ID; fall back to host:port
+                device_info = await _get_device_info(host, port)
+                unique_id = (
+                    device_info.get("id") if device_info and device_info.get("id")
+                    else f"{host}:{port}"
+                )
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
                 return self.async_create_entry(
                     title=f"CANtera ({host})",
                     data=user_input,
