@@ -21,6 +21,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a CANtera config entry."""
-    coordinator: CanteraCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
-    await coordinator.stop()
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        coordinator: CanteraCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        await coordinator.stop()
+    return unload_ok
