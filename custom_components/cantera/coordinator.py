@@ -24,6 +24,11 @@ from .const import (
     SSE_ENDPOINT,
     SSE_EVENT_TYPE_OBD,
     SSE_RECONNECT_DELAY_S,
+    SYNC_STALE_THRESHOLD_S,
+    SYNC_STATUS_API_OFFLINE,
+    SYNC_STATUS_CAR_OFF,
+    SYNC_STATUS_LIVE,
+    SYNC_STATUS_SYNCING,
 )
 from .ha_statistics import import_statistics
 
@@ -55,6 +60,8 @@ class CanteraCoordinator:
         self._consecutive_health_failures: int = 0
         self._api_reachable: bool = False
         self._health_unsub: Callable | None = None
+        # True while history backfill is in progress for the current connection.
+        self._backfilling: bool = False
 
     # ------------------------------------------------------------------
     # Public API — SSE readings
@@ -103,6 +110,30 @@ class CanteraCoordinator:
     def health_data(self) -> dict:
         """Last successful /api/health response (contains can_connected, etc.)."""
         return self._health_data
+
+    @property
+    def sync_status(self) -> str:
+        """Composite data-update status for the sync-status sensor.
+
+        States (in priority order):
+        - ``api_offline``: /api/health is unreachable (Pi is down / no network).
+        - ``syncing``:     API reachable, history backfill is in progress.
+        - ``car_off``:     API reachable, CAN not connected or readings stale.
+        - ``live``:        API reachable, CAN connected, recent reading (<30 s).
+        """
+        if not self._api_reachable:
+            return SYNC_STATUS_API_OFFLINE
+        if self._backfilling:
+            return SYNC_STATUS_SYNCING
+        if not self._health_data.get("can_connected", False):
+            return SYNC_STATUS_CAR_OFF
+        last_ms: int = self._health_data.get("last_reading_ms", 0)
+        if last_ms == 0:
+            return SYNC_STATUS_CAR_OFF
+        now_ms = int(datetime.now(UTC).timestamp() * 1000)
+        if (now_ms - last_ms) > SYNC_STALE_THRESHOLD_S * 1000:
+            return SYNC_STATUS_CAR_OFF
+        return SYNC_STATUS_LIVE
 
     def add_health_listener(self, cb: Callable[[dict], None]) -> None:
         """Register a callback invoked on each health poll state change."""
@@ -234,6 +265,8 @@ class CanteraCoordinator:
         self, session: aiohttp.ClientSession
     ) -> None:
         """Fetch /api/history for the gap since last sync, import stats."""
+        self._backfilling = True
+        self._notify_health_listeners()
         try:
             last_sync_ms = await self._load_last_sync()
             now_ms = int(datetime.now(UTC).timestamp() * 1000)
@@ -263,6 +296,9 @@ class CanteraCoordinator:
                 await self._save_last_sync(last_imported_ts)
         except Exception:
             _LOGGER.exception("History backfill failed")
+        finally:
+            self._backfilling = False
+            self._notify_health_listeners()
 
     async def _load_last_sync(self) -> int:
         """Load last sync timestamp from HA storage (ms, 0 if never synced)."""

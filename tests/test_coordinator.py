@@ -1,10 +1,11 @@
 """Tests for CanteraCoordinator."""
 import asyncio
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from custom_components.cantera.coordinator import CanteraCoordinator
+import pytest
+
 from custom_components.cantera.const import CONF_HOST, CONF_PORT
+from custom_components.cantera.coordinator import CanteraCoordinator
 
 
 @pytest.fixture
@@ -97,10 +98,9 @@ async def test_start_creates_sse_task(hass, coordinator):
         coordinator.start()
     assert coordinator._sse_task is not None
     coordinator._sse_task.cancel()
-    try:
+    import contextlib
+    with contextlib.suppress(asyncio.CancelledError):
         await coordinator._sse_task
-    except asyncio.CancelledError:
-        pass
 
 
 async def test_stop_cancels_task(hass, coordinator):
@@ -153,8 +153,9 @@ async def test_poll_health_failure_increments_counter(coordinator):
 
 async def test_poll_health_marks_unreachable_after_threshold(coordinator):
     """After HEALTH_FAIL_THRESHOLD failures, is_api_reachable → False with notification."""
-    from custom_components.cantera.const import HEALTH_FAIL_THRESHOLD
     import aiohttp
+
+    from custom_components.cantera.const import HEALTH_FAIL_THRESHOLD
 
     coordinator._api_reachable = True  # Simulate previously reachable.
     health_cb = MagicMock()
@@ -234,13 +235,15 @@ async def test_backfill_history_200_imports_stats_and_saves(coordinator):
     ]
     mock_session = _make_mock_session(200, json_return=readings)
 
-    with patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0):
-        with patch(
+    with (
+        patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0),
+        patch(
             "custom_components.cantera.coordinator.import_statistics",
             new_callable=AsyncMock,
-        ) as mock_import:
-            with patch.object(coordinator, "_save_last_sync", new_callable=AsyncMock) as mock_save:
-                await coordinator._backfill_history(mock_session)
+        ) as mock_import,
+        patch.object(coordinator, "_save_last_sync", new_callable=AsyncMock) as mock_save,
+    ):
+        await coordinator._backfill_history(mock_session)
 
     mock_import.assert_awaited_once()
     mock_save.assert_awaited_once_with(1700000000000)
@@ -250,12 +253,14 @@ async def test_backfill_history_404_logs_warning_and_returns(coordinator):
     """Non-200 response: import_statistics is NOT called."""
     mock_session = _make_mock_session(404)
 
-    with patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0):
-        with patch(
+    with (
+        patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0),
+        patch(
             "custom_components.cantera.coordinator.import_statistics",
             new_callable=AsyncMock,
-        ) as mock_import:
-            await coordinator._backfill_history(mock_session)
+        ) as mock_import,
+    ):
+        await coordinator._backfill_history(mock_session)
 
     mock_import.assert_not_awaited()
 
@@ -299,13 +304,15 @@ async def test_backfill_history_empty_readings_skips_import(coordinator):
     """Empty readings list: import_statistics and _save_last_sync are NOT called."""
     mock_session = _make_mock_session(200, json_return=[])
 
-    with patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0):
-        with patch(
+    with (
+        patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0),
+        patch(
             "custom_components.cantera.coordinator.import_statistics",
             new_callable=AsyncMock,
-        ) as mock_import:
-            with patch.object(coordinator, "_save_last_sync", new_callable=AsyncMock) as mock_save:
-                await coordinator._backfill_history(mock_session)
+        ) as mock_import,
+        patch.object(coordinator, "_save_last_sync", new_callable=AsyncMock) as mock_save,
+    ):
+        await coordinator._backfill_history(mock_session)
 
     mock_import.assert_not_awaited()
     mock_save.assert_not_awaited()
@@ -350,9 +357,11 @@ async def test_sse_loop_reconnects_after_exception(coordinator):
         # Exit cleanly on the second iteration via CancelledError handler
         raise asyncio.CancelledError()
 
-    with patch.object(coordinator, "_connect_and_stream", side_effect=fake_connect):
-        with patch("asyncio.sleep", new_callable=AsyncMock):
-            await coordinator._sse_loop()
+    with (
+        patch.object(coordinator, "_connect_and_stream", side_effect=fake_connect),
+        patch("asyncio.sleep", new_callable=AsyncMock),
+    ):
+        await coordinator._sse_loop()
 
     assert coordinator._connected is False
     assert iterations == 2

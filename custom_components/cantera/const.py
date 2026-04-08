@@ -32,6 +32,14 @@ DEVICE_MANUFACTURER = "CANtera"
 DEVICE_MODEL = "OBD-II Logger"
 DEVICE_IDENTIFIER = "cantera_vehicle"
 
+# Sync status sensor states.
+# A reading is considered stale when last_reading_ms is older than this.
+SYNC_STATUS_LIVE = "live"
+SYNC_STATUS_CAR_OFF = "car_off"
+SYNC_STATUS_SYNCING = "syncing"
+SYNC_STATUS_API_OFFLINE = "api_offline"
+SYNC_STALE_THRESHOLD_S = 30  # seconds before a reading timestamp is considered stale
+
 # Unit -> HA device_class mapping
 UNIT_DEVICE_CLASS_MAP = {
     "km/h": "speed",

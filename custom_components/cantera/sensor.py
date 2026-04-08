@@ -6,6 +6,7 @@ import logging
 from homeassistant.components.sensor import (
     RestoreSensor,
     SensorDeviceClass,
+    SensorEntity,
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -18,6 +19,10 @@ from .const import (
     DEVICE_MANUFACTURER,
     DEVICE_MODEL,
     DOMAIN,
+    SYNC_STATUS_API_OFFLINE,
+    SYNC_STATUS_CAR_OFF,
+    SYNC_STATUS_LIVE,
+    SYNC_STATUS_SYNCING,
     UNIT_DEVICE_CLASS_MAP,
     UNIT_STATE_CLASS_MAP,
 )
@@ -49,6 +54,9 @@ async def async_setup_entry(
     """Set up CANtera sensors from a config entry."""
     coordinator: CanteraCoordinator = hass.data[DOMAIN][entry.entry_id]
     known_pids: set[str] = set()
+
+    # Register the static sync-status sensor immediately.
+    async_add_entities([CanteraSyncStatusSensor(coordinator)])
 
     @callback
     def _on_reading(reading: dict) -> None:
@@ -126,3 +134,66 @@ class CanteraSensor(RestoreSensor):
         if pid_slug == self._slug:
             self._attr_native_value = reading.get("value")
             self.async_write_ha_state()
+
+
+# ---------------------------------------------------------------------------
+# Sync-status sensor
+# ---------------------------------------------------------------------------
+
+_SYNC_STATUS_ICON: dict[str, str] = {
+    SYNC_STATUS_LIVE: "mdi:check-circle",
+    SYNC_STATUS_CAR_OFF: "mdi:car-off",
+    SYNC_STATUS_SYNCING: "mdi:sync",
+    SYNC_STATUS_API_OFFLINE: "mdi:wifi-off",
+}
+
+
+class CanteraSyncStatusSensor(SensorEntity):
+    """Sensor reporting the current data-update status of the CANtera integration.
+
+    States:
+    - ``live``:        API reachable, CAN connected, reading < 30 s old.
+    - ``car_off``:     API reachable but no recent CAN data.
+    - ``syncing``:     Connected to API; history backfill is in progress.
+    - ``api_offline``: /api/health is unreachable.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Data Sync Status"
+    _attr_should_poll = False
+
+    def __init__(self, coordinator: CanteraCoordinator) -> None:
+        """Initialise from coordinator."""
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{DOMAIN}_sync_status"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, DEVICE_IDENTIFIER)},
+            name="CANtera Vehicle",
+            manufacturer=DEVICE_MANUFACTURER,
+            model=DEVICE_MODEL,
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Register health listener when added to HA."""
+        await super().async_added_to_hass()
+        self._coordinator.add_health_listener(self._handle_health_update)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unregister health listener."""
+        self._coordinator.remove_health_listener(self._handle_health_update)
+
+    @property
+    def native_value(self) -> str:
+        """Return the current sync-status string."""
+        return self._coordinator.sync_status
+
+    @property
+    def icon(self) -> str:
+        """Return an icon matching the current state."""
+        return _SYNC_STATUS_ICON.get(self._coordinator.sync_status, "mdi:help-circle")
+
+    @callback
+    def _handle_health_update(self, _health_data: dict) -> None:
+        """Refresh state whenever the health poll fires."""
+        self.async_write_ha_state()
+
