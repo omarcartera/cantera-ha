@@ -1,16 +1,15 @@
-"""DataUpdateCoordinator for CANtera — SSE client + history backfill."""
+"""Coordinator for CANtera — SSE client + history backfill."""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Callable
 
 import aiohttp
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
     CONF_HOST,
@@ -27,12 +26,12 @@ from .ha_statistics import import_statistics
 _LOGGER = logging.getLogger(__name__)
 
 
-class CanteraCoordinator(DataUpdateCoordinator):
+class CanteraCoordinator:
     """Manages SSE connection and history backfill for one CANtera device."""
 
     def __init__(self, hass: HomeAssistant, config_entry) -> None:
         """Initialise the coordinator."""
-        super().__init__(hass, _LOGGER, name=DOMAIN)
+        self._hass = hass
         self._host: str = config_entry.data[CONF_HOST]
         self._port: int = config_entry.data[CONF_PORT]
         self._base_url = f"http://{self._host}:{self._port}"
@@ -50,7 +49,7 @@ class CanteraCoordinator(DataUpdateCoordinator):
 
     def start(self) -> None:
         """Start the SSE connection loop."""
-        self._sse_task = self.hass.async_create_task(self._sse_loop())
+        self._sse_task = self._hass.async_create_task(self._sse_loop())
 
     async def stop(self) -> None:
         """Stop the SSE connection loop."""
@@ -61,10 +60,6 @@ class CanteraCoordinator(DataUpdateCoordinator):
             except asyncio.CancelledError:
                 pass
             self._sse_task = None
-
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Required by DataUpdateCoordinator; not used for polling."""
-        return {}
 
     # ------------------------------------------------------------------
     # Internal
