@@ -4,8 +4,8 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
-    SensorEntity,
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -61,7 +61,7 @@ async def async_setup_entry(
     entry.async_on_unload(lambda: coordinator.remove_reading_listener(_on_reading))
 
 
-class CanteraSensor(SensorEntity):
+class CanteraSensor(RestoreSensor):
     """A single OBD PID sensor entity."""
 
     def __init__(
@@ -97,12 +97,17 @@ class CanteraSensor(SensorEntity):
         )
 
         self._slug = slug
-        self._coordinator = coordinator
 
     async def async_added_to_hass(self) -> None:
-        """Register callback when entity is added to HA."""
+        """Register callback and restore state when added to HA."""
         await super().async_added_to_hass()
         self._coordinator.add_reading_listener(self._handle_reading)
+        if (last_data := await self.async_get_last_sensor_data()) is not None:
+            self._attr_native_value = last_data.native_value
+            if last_data.native_unit_of_measurement:
+                self._attr_native_unit_of_measurement = (
+                    last_data.native_unit_of_measurement
+                )
 
     async def async_will_remove_from_hass(self) -> None:
         """Unregister callback when entity is removed from HA."""
