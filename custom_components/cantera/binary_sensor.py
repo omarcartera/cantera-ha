@@ -1,4 +1,4 @@
-"""HA binary sensor for CANtera connection status."""
+"""HA binary sensors for CANtera — API reachability and CAN connection."""
 from __future__ import annotations
 
 import logging
@@ -25,40 +25,92 @@ async def async_setup_entry(
 ) -> None:
     """Set up CANtera binary sensors from a config entry."""
     coordinator: CanteraCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([CanteraConnectionSensor(coordinator)])
+    async_add_entities([
+        CanteraConnectionSensor(coordinator),
+        CanteraCanConnectionSensor(coordinator),
+    ])
+
+
+def _device_info() -> DeviceInfo:
+    return DeviceInfo(
+        identifiers={(DOMAIN, DEVICE_IDENTIFIER)},
+        name="CANtera Vehicle",
+        manufacturer=DEVICE_MANUFACTURER,
+        model=DEVICE_MODEL,
+    )
 
 
 class CanteraConnectionSensor(BinarySensorEntity):
-    """Binary sensor tracking SSE connection state."""
+    """Binary sensor tracking API server reachability via /api/health polling.
+
+    Uses a 5-second heartbeat poll so the sensor goes offline within ~10 s
+    of the Pi losing power — much faster and more reliable than the previous
+    SSE-based approach.
+    """
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_has_entity_name = True
-    _attr_name = "Connection"
+    _attr_name = "API Connection"
 
     def __init__(self, coordinator: CanteraCoordinator) -> None:
         self._coordinator = coordinator
+        # Keep the same unique_id so existing HA entities migrate seamlessly.
         self._attr_unique_id = f"{DOMAIN}_connection"
-        self._attr_is_on = coordinator.is_connected
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, DEVICE_IDENTIFIER)},
-            name="CANtera Vehicle",
-            manufacturer=DEVICE_MANUFACTURER,
-            model=DEVICE_MODEL,
-        )
+        self._attr_is_on = coordinator.is_api_reachable
+        self._attr_device_info = _device_info()
 
     async def async_added_to_hass(self) -> None:
-        """Register connection state callback."""
+        """Register health poll callback."""
         await super().async_added_to_hass()
-        self._coordinator.add_connection_listener(self._handle_connection_change)
+        self._coordinator.add_health_listener(self._handle_health_update)
 
     async def async_will_remove_from_hass(self) -> None:
-        """Unregister connection state callback."""
-        self._coordinator.remove_connection_listener(self._handle_connection_change)
+        """Unregister health poll callback."""
+        self._coordinator.remove_health_listener(self._handle_health_update)
 
     @callback
-    def _handle_connection_change(self) -> None:
-        """Update state when connection state changes."""
-        self._attr_is_on = self._coordinator.is_connected
+    def _handle_health_update(self, _health_data: dict) -> None:
+        """Update state from health poll result."""
+        self._attr_is_on = self._coordinator.is_api_reachable
+        self.async_write_ha_state()
+
+    @property
+    def should_poll(self) -> bool:
+        return False
+
+
+class CanteraCanConnectionSensor(BinarySensorEntity):
+    """Binary sensor tracking live CAN/OBD link to the vehicle ECU.
+
+    Reflects the ``can_connected`` field returned by ``/api/health``.
+    This field is ``true`` only when the OBD polling loop is actively
+    exchanging frames with the ECU, so it accurately represents whether
+    a vehicle is connected and powered on.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_has_entity_name = True
+    _attr_name = "CAN Connection"
+
+    def __init__(self, coordinator: CanteraCoordinator) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{DOMAIN}_can_connection"
+        self._attr_is_on = False  # Unknown until first health poll.
+        self._attr_device_info = _device_info()
+
+    async def async_added_to_hass(self) -> None:
+        """Register health poll callback."""
+        await super().async_added_to_hass()
+        self._coordinator.add_health_listener(self._handle_health_update)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unregister health poll callback."""
+        self._coordinator.remove_health_listener(self._handle_health_update)
+
+    @callback
+    def _handle_health_update(self, health_data: dict) -> None:
+        """Update state from can_connected field in /api/health response."""
+        self._attr_is_on = health_data.get("can_connected", False)
         self.async_write_ha_state()
 
     @property
