@@ -269,6 +269,32 @@ async def test_backfill_history_exception_does_not_propagate(coordinator):
         await coordinator._backfill_history(mock_session)
 
 
+async def test_backfill_history_exception_inside_context_manager(coordinator):
+    """Exception raised inside the response context (e.g. JSON decode) is caught."""
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json = AsyncMock(side_effect=RuntimeError("json decode failed"))
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+    mock_session = AsyncMock()
+    mock_session.get = MagicMock(return_value=mock_resp)
+
+    with patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0):
+        # Must not raise
+        await coordinator._backfill_history(mock_session)
+
+
+async def test_backfill_history_exception_inside_context_manager_does_not_propagate(coordinator):
+    """Exception raised while reading response body (inside async-with) is also caught."""
+    mock_session = _make_mock_session(200)
+    mock_session.get.return_value.json = AsyncMock(side_effect=RuntimeError("json decode error"))
+
+    with patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0):
+        # Must not raise
+        await coordinator._backfill_history(mock_session)
+
+
 async def test_backfill_history_empty_readings_skips_import(coordinator):
     """Empty readings list: import_statistics and _save_last_sync are NOT called."""
     mock_session = _make_mock_session(200, json_return=[])
