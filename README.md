@@ -34,11 +34,12 @@ Raspberry Pi and streams live vehicle data into HA sensor entities.
 SSH into the Pi and start CANtera with the API server enabled:
 
 ```bash
-cantera log-obd --api-port 8088
+cantera log-obd --api
 ```
 
-> `--api-port 8088` replaces the old `--sse-port` flag and exposes three
-> endpoints: `/events` (SSE), `/api/history`, and `/api/last-sync`.
+> `--api` enables the built-in HTTP API server on port 8088 (default), exposing
+> three endpoints: `/events` (SSE), `/api/history`, and `/api/last-sync`.
+> To use a different port: `cantera log-obd --api --api-port 9000`.
 
 To run as a systemd service, create `/etc/systemd/system/cantera-obd.service`:
 
@@ -48,7 +49,7 @@ Description=CANtera OBD-II logger
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/cantera log-obd --api-port 8088
+ExecStart=/usr/local/bin/cantera log-obd --api
 Restart=on-failure
 RestartSec=10s
 User=pi
@@ -123,7 +124,7 @@ history graphs stay complete even if HA was offline.
 | **"cannot_connect" error** | Verify the Pi is reachable: `curl http://PI_IP:8088/events` should stream SSE data |
 | **No entities appear** | Entities are created on the first reading. Start the engine or turn the ignition on. |
 | **Connection drops frequently** | Check network stability between HA and the Pi. Tailscale is recommended for reliable connectivity. |
-| **Wrong port** | Ensure `--api-port` matches what you entered in the HA config flow (default: 8088) |
+| **Wrong port** | Use `--api-port <N>` when starting CANtera and enter the same port in the HA config flow (default: 8088) |
 | **History not importing** | Check HA logs for "History backfill failed". The Pi must have Parquet files in the log directory. |
 
 ---
