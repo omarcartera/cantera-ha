@@ -1,5 +1,7 @@
 """Tests for ha_statistics module."""
 import pytest
+from unittest.mock import patch
+
 from custom_components.cantera.ha_statistics import aggregate_readings, _bucket_start, BUCKET_S
 
 
@@ -78,3 +80,87 @@ def test_aggregate_readings_sorted_by_bucket():
     result = aggregate_readings(readings)
     starts = [b["start"] for b in result["rpm"]]
     assert starts == sorted(starts)
+
+
+# ---------------------------------------------------------------------------
+# import_statistics (covers lines 59-91)
+# ---------------------------------------------------------------------------
+
+from custom_components.cantera.ha_statistics import import_statistics
+
+
+async def test_import_statistics_empty_readings_is_noop(hass):
+    """import_statistics with empty readings calls nothing."""
+    with patch(
+        "custom_components.cantera.ha_statistics.async_add_external_statistics"
+    ) as mock_add:
+        await import_statistics(hass, [], {})
+    mock_add.assert_not_called()
+
+
+async def test_import_statistics_calls_add_external_statistics(hass):
+    """import_statistics builds correct metadata and passes it to HA."""
+
+    readings = [
+        {"pid": "Engine RPM", "timestamp_ms": BUCKET_S * 1000, "value": 2500.0, "unit": "rpm"},
+    ]
+    pid_units = {"Engine RPM": "rpm"}
+
+    with patch(
+        "custom_components.cantera.ha_statistics.async_add_external_statistics"
+    ) as mock_add:
+        await import_statistics(hass, readings, pid_units)
+
+    mock_add.assert_called_once()
+    _, metadata, stats = mock_add.call_args.args
+    assert metadata["name"] == "Engine RPM"
+    assert metadata["unit_of_measurement"] == "rpm"
+    assert metadata["has_mean"] is True
+    assert metadata["has_sum"] is False
+    assert len(stats) == 1
+    assert stats[0]["mean"] == 2500.0
+
+
+async def test_import_statistics_no_unit_sets_none(hass):
+    """import_statistics sets unit_of_measurement to None when unit is empty string."""
+
+    readings = [{"pid": "custom_pid", "timestamp_ms": BUCKET_S * 1000, "value": 42.0, "unit": ""}]
+
+    with patch(
+        "custom_components.cantera.ha_statistics.async_add_external_statistics"
+    ) as mock_add:
+        await import_statistics(hass, readings, {"custom_pid": ""})
+
+    _, metadata, _ = mock_add.call_args.args
+    assert metadata["unit_of_measurement"] is None
+
+
+async def test_import_statistics_exception_does_not_crash(hass):
+    """Exception in async_add_external_statistics is caught; no crash."""
+
+    readings = [
+        {"pid": "Engine RPM", "timestamp_ms": BUCKET_S * 1000, "value": 1000.0, "unit": "rpm"},
+    ]
+
+    with patch(
+        "custom_components.cantera.ha_statistics.async_add_external_statistics",
+        side_effect=RuntimeError("recorder unavailable"),
+    ):
+        await import_statistics(hass, readings, {"Engine RPM": "rpm"})
+
+
+async def test_import_statistics_multiple_pids(hass):
+    """import_statistics imports stats for each unique PID."""
+
+    readings = [
+        {"pid": "Engine RPM", "timestamp_ms": BUCKET_S * 1000, "value": 2000.0, "unit": "rpm"},
+        {"pid": "Vehicle Speed", "timestamp_ms": BUCKET_S * 1000, "value": 80.0, "unit": "km/h"},
+    ]
+    pid_units = {"Engine RPM": "rpm", "Vehicle Speed": "km/h"}
+
+    with patch(
+        "custom_components.cantera.ha_statistics.async_add_external_statistics"
+    ) as mock_add:
+        await import_statistics(hass, readings, pid_units)
+
+    assert mock_add.call_count == 2

@@ -8,4 +8,17 @@ omit = ["tests/*"]
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 70
+fail_under = 80
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008", "B905"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_return_any = false
