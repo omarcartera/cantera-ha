@@ -58,6 +58,7 @@ async def async_setup_entry(
             async_add_entities([CanteraSensor(coordinator, reading)])
 
     coordinator.add_reading_listener(_on_reading)
+    entry.async_on_unload(lambda: coordinator.remove_reading_listener(_on_reading))
 
 
 class CanteraSensor(SensorEntity):
@@ -96,7 +97,16 @@ class CanteraSensor(SensorEntity):
         )
 
         self._slug = slug
-        coordinator.add_reading_listener(self._handle_reading)
+        self._coordinator = coordinator
+
+    async def async_added_to_hass(self) -> None:
+        """Register callback when entity is added to HA."""
+        await super().async_added_to_hass()
+        self._coordinator.add_reading_listener(self._handle_reading)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unregister callback when entity is removed from HA."""
+        self._coordinator.remove_reading_listener(self._handle_reading)
 
     @property
     def should_poll(self) -> bool:
