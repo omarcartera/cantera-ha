@@ -1,4 +1,4 @@
-"""HA binary sensors for CANtera — API reachability and CAN connection."""
+"""HA binary sensors for CANtera — CAN/OBD vehicle connection."""
 from __future__ import annotations
 
 import logging
@@ -25,10 +25,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up CANtera binary sensors from a config entry."""
     coordinator: CanteraCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([
-        CanteraConnectionSensor(coordinator),
-        CanteraCanConnectionSensor(coordinator),
-    ])
+    async_add_entities([CanteraCanConnectionSensor(coordinator)])
 
 
 def _device_info() -> DeviceInfo:
@@ -38,45 +35,6 @@ def _device_info() -> DeviceInfo:
         manufacturer=DEVICE_MANUFACTURER,
         model=DEVICE_MODEL,
     )
-
-
-class CanteraConnectionSensor(BinarySensorEntity):
-    """Binary sensor tracking API server reachability via /api/health polling.
-
-    Uses a 5-second heartbeat poll so the sensor goes offline within ~10 s
-    of the Pi losing power — much faster and more reliable than the previous
-    SSE-based approach.
-    """
-
-    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
-    _attr_has_entity_name = True
-    _attr_name = "API Connection"
-
-    def __init__(self, coordinator: CanteraCoordinator) -> None:
-        self._coordinator = coordinator
-        # Keep the same unique_id so existing HA entities migrate seamlessly.
-        self._attr_unique_id = f"{DOMAIN}_connection"
-        self._attr_is_on = coordinator.is_api_reachable
-        self._attr_device_info = _device_info()
-
-    async def async_added_to_hass(self) -> None:
-        """Register health poll callback."""
-        await super().async_added_to_hass()
-        self._coordinator.add_health_listener(self._handle_health_update)
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Unregister health poll callback."""
-        self._coordinator.remove_health_listener(self._handle_health_update)
-
-    @callback
-    def _handle_health_update(self, _health_data: dict) -> None:
-        """Update state from health poll result."""
-        self._attr_is_on = self._coordinator.is_api_reachable
-        self.async_write_ha_state()
-
-    @property
-    def should_poll(self) -> bool:
-        return False
 
 
 class CanteraCanConnectionSensor(BinarySensorEntity):

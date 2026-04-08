@@ -3,10 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.cantera.binary_sensor import (
-    CanteraCanConnectionSensor,
-    CanteraConnectionSensor,
-)
+from custom_components.cantera.binary_sensor import CanteraCanConnectionSensor
 from custom_components.cantera.const import CONF_HOST, CONF_PORT, DOMAIN
 from custom_components.cantera.coordinator import CanteraCoordinator
 
@@ -21,64 +18,6 @@ def mock_entry():
 @pytest.fixture
 def coordinator(hass, mock_entry):
     return CanteraCoordinator(hass, mock_entry)
-
-
-# ---------- CanteraConnectionSensor ----------
-
-def test_connection_sensor_initial_state(coordinator):
-    """Sensor initialises from coordinator.is_api_reachable (False)."""
-    sensor = CanteraConnectionSensor(coordinator)
-    assert sensor._attr_is_on is False
-
-
-def test_connection_sensor_unique_id(coordinator):
-    """Unique ID is preserved for migration from SSE-based sensor."""
-    sensor = CanteraConnectionSensor(coordinator)
-    assert sensor._attr_unique_id == f"{DOMAIN}_connection"
-
-
-def test_connection_sensor_name(coordinator):
-    sensor = CanteraConnectionSensor(coordinator)
-    assert sensor._attr_name == "API Connection"
-
-
-def test_connection_sensor_no_poll(coordinator):
-    sensor = CanteraConnectionSensor(coordinator)
-    assert sensor.should_poll is False
-
-
-def test_connection_sensor_updates_on_health(coordinator):
-    """_handle_health_update reflects is_api_reachable."""
-    sensor = CanteraConnectionSensor(coordinator)
-    sensor.async_write_ha_state = MagicMock()
-
-    coordinator._api_reachable = True
-    sensor._handle_health_update({})
-    assert sensor._attr_is_on is True
-    sensor.async_write_ha_state.assert_called_once()
-
-    coordinator._api_reachable = False
-    sensor._handle_health_update({})
-    assert sensor._attr_is_on is False
-
-
-async def test_connection_sensor_registers_health_listener(hass, coordinator):
-    """async_added_to_hass registers a health listener."""
-    sensor = CanteraConnectionSensor(coordinator)
-    sensor.hass = hass
-    sensor.async_write_ha_state = MagicMock()
-    await sensor.async_added_to_hass()
-    assert sensor._handle_health_update in coordinator._health_listeners
-
-
-async def test_connection_sensor_removes_listener_on_remove(hass, coordinator):
-    """async_will_remove_from_hass unregisters the health listener."""
-    sensor = CanteraConnectionSensor(coordinator)
-    sensor.hass = hass
-    sensor.async_write_ha_state = MagicMock()
-    await sensor.async_added_to_hass()
-    await sensor.async_will_remove_from_hass()
-    assert sensor._handle_health_update not in coordinator._health_listeners
 
 
 # ---------- CanteraCanConnectionSensor ----------
