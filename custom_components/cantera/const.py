@@ -9,6 +9,7 @@ DEFAULT_HOST = ""  # user must provide
 # API endpoints — must match api_server/constants.rs
 SSE_ENDPOINT = "/events"
 HISTORY_ENDPOINT = "/api/history"
+DEVICE_ENDPOINT = "/api/device"
 
 # SSE behaviour
 SSE_RECONNECT_DELAY_S = 5
