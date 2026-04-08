@@ -1,6 +1,7 @@
 """Tests for CANtera config flow."""
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 from custom_components.cantera.config_flow import (
     CanteraConfigFlow,

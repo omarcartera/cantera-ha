@@ -1,8 +1,9 @@
 """Tests for CANtera __init__ setup and teardown."""
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from custom_components.cantera import async_setup_entry, async_unload_entry
 from custom_components.cantera.const import DOMAIN
@@ -20,7 +21,9 @@ async def test_async_setup_entry_creates_coordinator(hass, mock_entry):
     mock_coordinator = MagicMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock(return_value=True)
 
-    with patch("custom_components.cantera.CanteraCoordinator", return_value=mock_coordinator) as mock_cls:
+    with patch(
+        "custom_components.cantera.CanteraCoordinator", return_value=mock_coordinator
+    ) as mock_cls:
         result = await async_setup_entry(hass, mock_entry)
 
     assert result is True

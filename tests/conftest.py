@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 try:
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
+    from pytest_homeassistant_custom_component.common import (
+        MockConfigEntry as _MockConfigEntry,  # noqa: F401
+    )
     HAS_HA_TEST = True
 except ImportError:
     HAS_HA_TEST = False

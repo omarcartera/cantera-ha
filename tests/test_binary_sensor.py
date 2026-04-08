@@ -1,13 +1,14 @@
 """Tests for CANtera binary sensor entities."""
-import pytest
 from unittest.mock import MagicMock
 
+import pytest
+
 from custom_components.cantera.binary_sensor import (
-    CanteraConnectionSensor,
     CanteraCanConnectionSensor,
+    CanteraConnectionSensor,
 )
-from custom_components.cantera.coordinator import CanteraCoordinator
 from custom_components.cantera.const import CONF_HOST, CONF_PORT, DOMAIN
+from custom_components.cantera.coordinator import CanteraCoordinator
 
 
 @pytest.fixture

@@ -1,8 +1,12 @@
 """Tests for ha_statistics module."""
-import pytest
 from unittest.mock import patch
 
-from custom_components.cantera.ha_statistics import aggregate_readings, _bucket_start, BUCKET_S
+from custom_components.cantera.ha_statistics import (
+    BUCKET_S,
+    _bucket_start,
+    aggregate_readings,
+    import_statistics,
+)
 
 
 def test_bucket_start_rounds_down():
@@ -35,8 +39,10 @@ def test_aggregate_readings_single():
 def test_aggregate_readings_multiple_same_bucket():
     bucket_ts = BUCKET_S * 10
     readings = [
-        {"pid": "engine_rpm", "timestamp_ms": (bucket_ts + 1) * 1000, "value": 1000.0, "unit": "rpm"},
-        {"pid": "engine_rpm", "timestamp_ms": (bucket_ts + 2) * 1000, "value": 3000.0, "unit": "rpm"},
+        {"pid": "engine_rpm", "timestamp_ms": (bucket_ts + 1) * 1000,
+         "value": 1000.0, "unit": "rpm"},
+        {"pid": "engine_rpm", "timestamp_ms": (bucket_ts + 2) * 1000,
+         "value": 3000.0, "unit": "rpm"},
     ]
     result = aggregate_readings(readings)
     bucket = result["engine_rpm"][0]
@@ -85,8 +91,6 @@ def test_aggregate_readings_sorted_by_bucket():
 # ---------------------------------------------------------------------------
 # import_statistics (covers lines 59-91)
 # ---------------------------------------------------------------------------
-
-from custom_components.cantera.ha_statistics import import_statistics
 
 
 async def test_import_statistics_empty_readings_is_noop(hass):
