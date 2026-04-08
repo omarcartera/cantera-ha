@@ -8,8 +8,13 @@ DEFAULT_HOST = ""  # user must provide
 
 # API endpoints — must match api_server/constants.rs
 SSE_ENDPOINT = "/events"
+HEALTH_ENDPOINT = "/api/health"
 HISTORY_ENDPOINT = "/api/history"
 DEVICE_ENDPOINT = "/api/device"
+
+# Health polling
+HEALTH_POLL_INTERVAL_S = 5
+HEALTH_FAIL_THRESHOLD = 2  # consecutive failures before marking unreachable
 
 # SSE behaviour
 SSE_RECONNECT_DELAY_S = 5

@@ -1,21 +1,25 @@
-"""Coordinator for CANtera — SSE client + history backfill."""
+"""Coordinator for CANtera — SSE client + health polling + history backfill."""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 import aiohttp
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 
 from .const import (
     CONF_HOST,
     CONF_PORT,
     DOMAIN,
+    HEALTH_ENDPOINT,
+    HEALTH_FAIL_THRESHOLD,
+    HEALTH_POLL_INTERVAL_S,
     HISTORY_ENDPOINT,
     SSE_ENDPOINT,
     SSE_EVENT_TYPE_OBD,
@@ -30,7 +34,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class CanteraCoordinator:
-    """Manages SSE connection and history backfill for one CANtera device."""
+    """Manages SSE connection, health polling, and history backfill."""
 
     def __init__(self, hass: HomeAssistant, config_entry) -> None:
         """Initialise the coordinator."""
@@ -45,8 +49,15 @@ class CanteraCoordinator:
         self._connected: bool = False
         self._connection_listeners: list[Callable[[], None]] = []
 
+        # Health polling state
+        self._health_listeners: list[Callable[[dict], None]] = []
+        self._health_data: dict = {}
+        self._consecutive_health_failures: int = 0
+        self._api_reachable: bool = False
+        self._health_unsub: Callable | None = None
+
     # ------------------------------------------------------------------
-    # Public API
+    # Public API — SSE readings
     # ------------------------------------------------------------------
 
     @property
@@ -81,15 +92,59 @@ class CanteraCoordinator:
         try:
             self._listeners.remove(cb)
         except ValueError:
-            pass  # Already removed or never added
+            pass
+
+    # ------------------------------------------------------------------
+    # Public API — Health polling
+    # ------------------------------------------------------------------
+
+    @property
+    def is_api_reachable(self) -> bool:
+        """True when /api/health responds successfully."""
+        return self._api_reachable
+
+    @property
+    def health_data(self) -> dict:
+        """Last successful /api/health response (contains can_connected, etc.)."""
+        return self._health_data
+
+    def add_health_listener(self, cb: Callable[[dict], None]) -> None:
+        """Register a callback invoked on each health poll state change."""
+        self._health_listeners.append(cb)
+
+    def remove_health_listener(self, cb: Callable[[dict], None]) -> None:
+        """Remove a health poll callback."""
+        try:
+            self._health_listeners.remove(cb)
+        except ValueError:
+            pass
+
+    def _notify_health_listeners(self) -> None:
+        for cb in self._health_listeners:
+            cb(self._health_data)
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
     def start(self) -> None:
-        """Start the SSE connection loop."""
+        """Start the SSE connection loop and health polling."""
         self._sse_task = self._hass.async_create_task(self._sse_loop())
+        self._health_unsub = async_track_time_interval(
+            self._hass,
+            self._poll_health,
+            timedelta(seconds=HEALTH_POLL_INTERVAL_S),
+        )
+        # Run an immediate first poll without waiting for the interval.
+        self._hass.async_create_task(self._poll_health())
 
     async def stop(self) -> None:
-        """Stop the SSE connection loop."""
+        """Stop the SSE loop and health polling."""
+        if self._health_unsub is not None:
+            self._health_unsub()
+            self._health_unsub = None
         self._set_connected(False)
+        self._api_reachable = False
         if self._sse_task:
             self._sse_task.cancel()
             try:
@@ -99,7 +154,38 @@ class CanteraCoordinator:
             self._sse_task = None
 
     # ------------------------------------------------------------------
-    # Internal
+    # Health polling
+    # ------------------------------------------------------------------
+
+    async def _poll_health(self, _now=None) -> None:
+        """Poll /api/health and update reachability state."""
+        url = f"{self._base_url}{HEALTH_ENDPOINT}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=3)
+                ) as resp:
+                    if resp.status == 200:
+                        self._health_data = await resp.json()
+                        self._consecutive_health_failures = 0
+                        if not self._api_reachable:
+                            self._api_reachable = True
+                        self._notify_health_listeners()
+                        return
+        except Exception:
+            pass
+
+        self._consecutive_health_failures += 1
+        if (
+            self._consecutive_health_failures >= HEALTH_FAIL_THRESHOLD
+            and self._api_reachable
+        ):
+            self._api_reachable = False
+            self._health_data = {}
+            self._notify_health_listeners()
+
+    # ------------------------------------------------------------------
+    # Internal — SSE
     # ------------------------------------------------------------------
 
     async def _sse_loop(self) -> None:
@@ -182,8 +268,6 @@ class CanteraCoordinator:
                     self._pid_units[r["pid"]] = r.get("unit", "")
                 await import_statistics(self._hass, readings, self._pid_units)
 
-                # Use max timestamp of actually returned rows, not now_ms.
-                # Prevents data loss when history is truncated at row limit.
                 last_imported_ts = max(r["ts"] for r in readings)
                 await self._save_last_sync(last_imported_ts)
         except Exception:
