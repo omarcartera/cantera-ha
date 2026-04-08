@@ -42,10 +42,35 @@ class CanteraCoordinator:
         self._sse_task: asyncio.Task | None = None
         self._pid_units: dict[str, str] = {}
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        self._connected: bool = False
+        self._connection_listeners: list[Callable[[], None]] = []
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    @property
+    def is_connected(self) -> bool:
+        """True when the SSE stream is actively connected."""
+        return self._connected
+
+    def add_connection_listener(self, cb: Callable[[], None]) -> None:
+        """Register a callback invoked when connection state changes."""
+        self._connection_listeners.append(cb)
+
+    def remove_connection_listener(self, cb: Callable[[], None]) -> None:
+        """Remove a connection state change callback."""
+        try:
+            self._connection_listeners.remove(cb)
+        except ValueError:
+            pass
+
+    def _set_connected(self, value: bool) -> None:
+        """Update connection state and notify listeners."""
+        if self._connected != value:
+            self._connected = value
+            for cb in self._connection_listeners:
+                cb()
 
     def add_reading_listener(self, cb: Callable[[dict], None]) -> None:
         """Register a callback invoked for each live SSE reading."""
@@ -64,6 +89,7 @@ class CanteraCoordinator:
 
     async def stop(self) -> None:
         """Stop the SSE connection loop."""
+        self._set_connected(False)
         if self._sse_task:
             self._sse_task.cancel()
             try:
@@ -82,6 +108,7 @@ class CanteraCoordinator:
             try:
                 await self._connect_and_stream()
             except asyncio.CancelledError:
+                self._set_connected(False)
                 return
             except Exception as exc:
                 _LOGGER.warning(
@@ -89,6 +116,7 @@ class CanteraCoordinator:
                     exc,
                     SSE_RECONNECT_DELAY_S,
                 )
+                self._set_connected(False)
             await asyncio.sleep(SSE_RECONNECT_DELAY_S)
 
     async def _connect_and_stream(self) -> None:
@@ -103,6 +131,7 @@ class CanteraCoordinator:
             async with session.get(url, timeout=timeout) as resp:
                 if resp.status != 200:
                     raise ConnectionError(f"SSE returned HTTP {resp.status}")
+                self._set_connected(True)
 
                 event_type = None
                 async for line in resp.content:
