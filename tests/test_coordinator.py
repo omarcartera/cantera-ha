@@ -1,11 +1,10 @@
 """Tests for CanteraCoordinator."""
 import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
-from homeassistant.core import HomeAssistant
+from unittest.mock import MagicMock
 
 from custom_components.cantera.coordinator import CanteraCoordinator
-from custom_components.cantera.const import DOMAIN, CONF_HOST, CONF_PORT
+from custom_components.cantera.const import CONF_HOST, CONF_PORT
 
 
 @pytest.fixture
@@ -35,11 +34,15 @@ def test_add_reading_listener(coordinator):
     assert cb in coordinator._listeners
 
 
-def test_start_creates_task(hass, coordinator):
+async def test_start_creates_task(hass, coordinator):
     """start() creates an SSE loop task."""
     coordinator.start()
     assert coordinator._sse_task is not None
     coordinator._sse_task.cancel()
+    try:
+        await coordinator._sse_task
+    except asyncio.CancelledError:
+        pass
 
 
 async def test_stop_cancels_task(hass, coordinator):
@@ -55,8 +58,7 @@ def test_reading_listener_called(coordinator):
     cb = MagicMock()
     coordinator.add_reading_listener(cb)
     reading = {"pid": "engine_rpm", "value": 2400.0, "unit": "rpm"}
-    # Simulate what SSE handler does
     coordinator._pid_units[reading["pid"]] = reading.get("unit", "")
-    for cb2 in coordinator._listeners:
-        cb2(reading)
+    for listener in coordinator._listeners:
+        listener(reading)
     cb.assert_called_once_with(reading)
