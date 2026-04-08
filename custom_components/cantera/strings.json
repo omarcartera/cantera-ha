@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to CANtera",
+        "description": "Enter the address of the Raspberry Pi running the CANtera OBD-II logger. Start CANtera with `cantera log-obd --api` to enable the HTTP API.",
+        "data": {
+          "host": "Host (IP address or hostname)",
+          "port": "Port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the CANtera API server. Verify the Pi is reachable and running `cantera log-obd --api`."
+    },
+    "abort": {
+      "already_configured": "CANtera device is already configured."
+    }
+  }
+}
