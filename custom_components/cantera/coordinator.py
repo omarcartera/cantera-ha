@@ -10,18 +10,21 @@ from typing import Callable
 import aiohttp
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 
 from .const import (
     CONF_HOST,
     CONF_PORT,
     DOMAIN,
     HISTORY_ENDPOINT,
-    LAST_SYNC_ENDPOINT,
     SSE_ENDPOINT,
     SSE_EVENT_TYPE_OBD,
     SSE_RECONNECT_DELAY_S,
 )
 from .ha_statistics import import_statistics
+
+STORAGE_KEY = f"{DOMAIN}.last_sync"
+STORAGE_VERSION = 1
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +41,7 @@ class CanteraCoordinator:
         self._listeners: list[Callable[[dict], None]] = []
         self._sse_task: asyncio.Task | None = None
         self._pid_units: dict[str, str] = {}
+        self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
 
     # ------------------------------------------------------------------
     # Public API
@@ -125,7 +129,7 @@ class CanteraCoordinator:
     ) -> None:
         """Fetch /api/history for the gap since last sync, import stats."""
         try:
-            last_sync_ms = await self._get_last_sync(session)
+            last_sync_ms = await self._load_last_sync()
             now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
             history_url = (
@@ -147,38 +151,22 @@ class CanteraCoordinator:
                 )
                 for r in readings:
                     self._pid_units[r["pid"]] = r.get("unit", "")
-                await import_statistics(self.hass, readings, self._pid_units)
-                await self._set_last_sync(session, now_ms)
+                await import_statistics(self._hass, readings, self._pid_units)
+
+                # Use max timestamp of actually returned rows, not now_ms.
+                # Prevents data loss when history is truncated at row limit.
+                last_imported_ts = max(r["ts"] for r in readings)
+                await self._save_last_sync(last_imported_ts)
         except Exception:
             _LOGGER.exception("History backfill failed")
 
-    async def _get_last_sync(self, session: aiohttp.ClientSession) -> int:
-        """Return last sync timestamp in ms (0 if never synced)."""
-        try:
-            url = f"{self._base_url}{LAST_SYNC_ENDPOINT}"
-            async with session.get(
-                url, timeout=aiohttp.ClientTimeout(total=5)
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    ts = data.get("ts")
-                    return ts if ts is not None else 0
-        except Exception:
-            pass
-        return 0
+    async def _load_last_sync(self) -> int:
+        """Load last sync timestamp from HA storage (ms, 0 if never synced)."""
+        data = await self._store.async_load()
+        if data is None:
+            return 0
+        return data.get("ts", 0)
 
-    async def _set_last_sync(
-        self, session: aiohttp.ClientSession, ts_ms: int
-    ) -> None:
-        """Write last sync timestamp to Pi."""
-        try:
-            url = f"{self._base_url}{LAST_SYNC_ENDPOINT}"
-            async with session.post(
-                url,
-                json={"ts": ts_ms},
-                timeout=aiohttp.ClientTimeout(total=5),
-            ) as resp:
-                if resp.status not in (200, 204):
-                    _LOGGER.debug("last-sync POST returned %d", resp.status)
-        except Exception:
-            _LOGGER.debug("Failed to update last-sync marker")
+    async def _save_last_sync(self, ts_ms: int) -> None:
+        """Persist last sync timestamp to HA storage."""
+        await self._store.async_save({"ts": ts_ms})
