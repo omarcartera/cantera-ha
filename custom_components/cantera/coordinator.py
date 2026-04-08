@@ -47,6 +47,13 @@ class CanteraCoordinator:
         """Register a callback invoked for each live SSE reading."""
         self._listeners.append(cb)
 
+    def remove_reading_listener(self, cb: Callable[[dict], None]) -> None:
+        """Remove a previously registered reading callback."""
+        try:
+            self._listeners.remove(cb)
+        except ValueError:
+            pass  # Already removed or never added
+
     def start(self) -> None:
         """Start the SSE connection loop."""
         self._sse_task = self._hass.async_create_task(self._sse_loop())
