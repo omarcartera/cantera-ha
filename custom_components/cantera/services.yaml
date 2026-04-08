@@ -1,0 +1,9 @@
+reconnect:
+  name: Reconnect
+  description: "Disconnect and reconnect the SSE stream to the CANtera OBD logger. Use this to recover from network blips without restarting HA."
+  fields: {}
+
+request_history:
+  name: Request history backfill
+  description: "Fetch and import historical readings from the CANtera Pi since the last sync. Useful to manually trigger a backfill after the Pi was offline."
+  fields: {}
