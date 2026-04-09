@@ -90,6 +90,31 @@ UNIT_STATE_CLASS_MAP = {
     "°": "measurement",
 }
 
+# Unit -> suggested display precision (decimal places shown in HA UI).
+# Units absent from this map get no override (HA auto-selects).
+UNIT_PRECISION_MAP: dict[str, int] = {
+    "rpm":   0,  # 2400, not 2400.12
+    "km/h":  0,  # 60, not 60.3
+    "mph":   0,
+    "°C":    1,  # 90.5
+    "℃":     1,
+    "%":     1,  # 42.3 %
+    "kPa":   1,  # 101.3 kPa
+    "Pa":    0,  # integer pascals
+    "V":     2,  # 14.23 V
+    "km":    0,  # 12345 km
+    "g/s":   2,  # 5.42 g/s
+    "L/h":   1,  # 8.5 L/h
+    "L":     1,
+    "s":     0,  # integer seconds
+    "min":   0,  # integer minutes
+    "Nm":    0,  # integer newton-metres
+    "ppm":   0,  # integer parts-per-million
+    "λ":     3,  # 0.998 lambda ratio
+    "°BTDC": 1,  # 12.5 °BTDC
+    "°":     1,  # generic degrees
+}
+
 # ---------------------------------------------------------------------------
 # OBD PID registries — sourced from src-tauri/src/db/mode01.rs and mode09.rs.
 # Each entry is (human-readable name, native unit or None).

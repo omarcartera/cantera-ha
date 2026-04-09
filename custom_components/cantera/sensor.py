@@ -26,6 +26,7 @@ from .const import (
     SYNC_STATUS_LIVE,
     SYNC_STATUS_SYNCING,
     UNIT_DEVICE_CLASS_MAP,
+    UNIT_PRECISION_MAP,
     UNIT_STATE_CLASS_MAP,
 )
 from .coordinator import CanteraCoordinator
@@ -102,6 +103,8 @@ class CanteraSensor(RestoreSensor):
             if sc_str
             else SensorStateClass.MEASUREMENT
         )
+
+        self._attr_suggested_display_precision = UNIT_PRECISION_MAP.get(unit) if unit else None
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, DEVICE_IDENTIFIER)},

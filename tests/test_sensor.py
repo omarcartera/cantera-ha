@@ -18,6 +18,7 @@ from custom_components.cantera.const import (
     SYNC_STATUS_CAR_OFF,
     SYNC_STATUS_LIVE,
     SYNC_STATUS_SYNCING,
+    UNIT_PRECISION_MAP,
 )
 from custom_components.cantera.coordinator import CanteraCoordinator
 from custom_components.cantera.sensor import (
@@ -65,6 +66,44 @@ def test_sensor_native_unit(sensor):
 def test_sensor_initial_value_is_none(sensor):
     """Pre-created sensors start with None — value arrives via SSE."""
     assert sensor._attr_native_value is None
+
+
+def test_sensor_precision_rpm(coordinator):
+    """rpm sensor gets 0 decimal places."""
+    s = CanteraSensor(coordinator, "Engine RPM", "rpm")
+    assert s._attr_suggested_display_precision == 0
+
+
+def test_sensor_precision_temperature(coordinator):
+    """°C sensor gets 1 decimal place."""
+    s = CanteraSensor(coordinator, "Engine Coolant Temperature", "°C")
+    assert s._attr_suggested_display_precision == 1
+
+
+def test_sensor_precision_voltage(coordinator):
+    """V sensor gets 2 decimal places."""
+    s = CanteraSensor(coordinator, "Control module voltage", "V")
+    assert s._attr_suggested_display_precision == 2
+
+
+def test_sensor_precision_lambda(coordinator):
+    """λ sensor gets 3 decimal places."""
+    s = CanteraSensor(coordinator, "Commanded equivalence ratio", "λ")
+    assert s._attr_suggested_display_precision == 3
+
+
+def test_sensor_precision_no_unit(coordinator):
+    """Sensor with no unit has no precision override."""
+    s = CanteraSensor(coordinator, "Freeze DTC")
+    assert s._attr_suggested_display_precision is None
+
+
+def test_sensor_precision_all_mapped_units(coordinator):
+    """Every unit in UNIT_PRECISION_MAP is a non-negative integer."""
+    for unit, precision in UNIT_PRECISION_MAP.items():
+        assert isinstance(precision, int) and precision >= 0, (
+            f"Bad precision for {unit!r}: {precision!r}"
+        )
 
 
 def test_sensor_device_info(sensor):
