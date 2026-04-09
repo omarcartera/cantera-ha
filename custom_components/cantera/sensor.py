@@ -72,11 +72,19 @@ async def async_setup_entry(
         CanteraSensor(coordinator, name, unit, entry, is_diagnostic=True)
         for name, unit in MODE09_PIDS
     ]
-    async_add_entities([
+    entities = [
         CanteraSyncStatusSensor(coordinator, entry),
         CanteraFirmwareVersionSensor(coordinator, entry),
         *pid_sensors,
-    ])
+    ]
+    async_add_entities(entities)
+
+    # Report our unique_ids so __init__.py can prune stale registry entries.
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    if "current_unique_ids" in entry_data:
+        entry_data["current_unique_ids"].update(
+            e.unique_id for e in entities if e.unique_id
+        )
 
 
 class CanteraSensor(RestoreSensor):

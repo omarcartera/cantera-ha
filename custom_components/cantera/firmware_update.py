@@ -44,10 +44,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up CANtera firmware update entity from a config entry."""
     coordinator: CanteraCoordinator = entry.runtime_data
-    async_add_entities(
-        [CanteraFirmwareUpdateEntity(coordinator, entry)],
-        update_before_add=True,
-    )
+    entity = CanteraFirmwareUpdateEntity(coordinator, entry)
+    async_add_entities([entity], update_before_add=True)
+
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    if "current_unique_ids" in entry_data and entity.unique_id:
+        entry_data["current_unique_ids"].add(entity.unique_id)
 
 
 class CanteraFirmwareUpdateEntity(UpdateEntity):

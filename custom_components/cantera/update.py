@@ -79,7 +79,12 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the CANtera update entity for this config entry."""
-    async_add_entities([CanteraUpdateEntity(hass, entry.entry_id)])
+    entity = CanteraUpdateEntity(hass, entry.entry_id)
+    async_add_entities([entity])
+
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    if "current_unique_ids" in entry_data and entity.unique_id:
+        entry_data["current_unique_ids"].add(entity.unique_id)
 
 
 class CanteraUpdateEntity(UpdateEntity):
