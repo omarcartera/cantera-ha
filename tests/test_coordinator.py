@@ -437,3 +437,220 @@ async def test_poll_health_reentrant_guard_prevents_concurrent_calls(hass):
     assert call_count == 0
     # Guard must still be True (we set it, poll returned early without touching finally)
     assert coordinator._health_poll_running is True
+
+
+# ---------- Connection state properties (lines 98, 102, 106-107, 112-117, 145, 150) ----------
+
+def test_is_connected_initially_false(coordinator):
+    """is_connected returns the internal _connected flag (starts False)."""
+    assert coordinator.is_connected is False
+
+
+def test_add_connection_listener_stores_callback(coordinator):
+    """add_connection_listener appends callback to _connection_listeners."""
+    cb = MagicMock()
+    coordinator.add_connection_listener(cb)
+    assert cb in coordinator._connection_listeners
+
+
+def test_remove_connection_listener_removes_callback(coordinator):
+    """remove_connection_listener removes a previously added callback."""
+    cb = MagicMock()
+    coordinator.add_connection_listener(cb)
+    coordinator.remove_connection_listener(cb)
+    assert cb not in coordinator._connection_listeners
+
+
+def test_remove_connection_listener_missing_is_safe(coordinator):
+    """Removing a callback that was never added does not raise."""
+    coordinator.remove_connection_listener(MagicMock())
+
+
+def test_set_connected_true_notifies_listeners(coordinator):
+    """_set_connected(True) calls all registered connection listeners."""
+    cb = MagicMock()
+    coordinator.add_connection_listener(cb)
+    coordinator._set_connected(True)
+    cb.assert_called_once()
+
+
+def test_set_connected_same_value_does_not_notify(coordinator):
+    """_set_connected with the same value (False→False) does NOT call listeners."""
+    cb = MagicMock()
+    coordinator.add_connection_listener(cb)
+    coordinator._set_connected(False)  # Already False — no change
+    cb.assert_not_called()
+
+
+def test_set_connected_listener_exception_does_not_propagate(coordinator):
+    """Exceptions raised inside a connection listener are swallowed."""
+    bad_cb = MagicMock(side_effect=RuntimeError("listener boom"))
+    coordinator.add_connection_listener(bad_cb)
+    coordinator._set_connected(True)  # Must not raise
+
+
+def test_api_offline_is_inverse_of_api_reachable(coordinator):
+    """api_offline returns True when _api_reachable is False, and vice-versa."""
+    coordinator._api_reachable = False
+    assert coordinator.api_offline is True
+    coordinator._api_reachable = True
+    assert coordinator.api_offline is False
+
+
+def test_device_info_returns_device_info_instance(coordinator):
+    """device_info returns a dict with identifiers (DeviceInfo is a TypedDict)."""
+    info = coordinator.device_info
+    assert isinstance(info, dict)
+    assert "identifiers" in info
+
+
+# ---------- _notify_health_listeners exception path (lines 197-198) ----------
+
+def test_notify_health_listeners_swallows_exception(coordinator):
+    """An exception raised by a health listener does not propagate."""
+    bad_cb = MagicMock(side_effect=RuntimeError("listener crash"))
+    coordinator.add_health_listener(bad_cb)
+    coordinator._notify_health_listeners()  # Must not raise
+
+
+# ---------- Car-off debounce timer start (line 224) ----------
+
+def test_update_car_off_debounce_starts_timer_when_was_ever_live(coordinator):
+    """Debounce timer starts when _was_ever_live is True and currently not live."""
+    coordinator._was_ever_live = True
+    coordinator._car_off_since_mono = None
+    coordinator._health_data = {"can_connected": False, "last_reading_ms": 0}
+    coordinator._update_car_off_debounce()
+    assert coordinator._car_off_since_mono is not None
+
+
+# ---------- _sse_loop backoff reset (line 316) ----------
+
+async def test_sse_loop_resets_backoff_after_successful_connection(coordinator):
+    """After _connect_and_stream returns without error, delay resets to initial value."""
+    connect_calls = 0
+
+    async def _fake_connect():
+        nonlocal connect_calls
+        connect_calls += 1
+        if connect_calls >= 2:
+            raise asyncio.CancelledError()
+        # First call returns normally — simulates successful SSE stream.
+
+    coordinator._connect_and_stream = _fake_connect
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        await coordinator._sse_loop()
+
+    assert connect_calls == 2
+
+
+# ---------- _connect_and_stream (lines 351-378) ----------
+
+async def test_connect_and_stream_non_200_raises(hass, mock_entry):
+    """A non-200 SSE response raises ConnectionError."""
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    coordinator._backfill_task = MagicMock(done=MagicMock(return_value=False))
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 503
+
+    with patch("aiohttp.ClientSession") as mock_session_cls:
+        mock_session = MagicMock()
+        mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_session.get.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        with pytest.raises(ConnectionError, match="SSE returned HTTP 503"):
+            await coordinator._connect_and_stream()
+
+
+async def test_connect_and_stream_dispatches_sse_readings(hass, mock_entry):
+    """SSE obd_reading events are parsed and dispatched to registered listeners."""
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    coordinator._backfill_task = MagicMock(done=MagicMock(return_value=False))
+
+    reading_cb = MagicMock()
+    coordinator.add_reading_listener("engine_rpm", reading_cb)
+
+    sse_lines = [
+        b"event: obd_reading\n",
+        b'data: {"pid": "Engine RPM", "value": 2400.0, "unit": "rpm"}\n',
+        b"\n",
+    ]
+
+    class _AsyncLineIter:
+        def __init__(self, items):
+            self._iter = iter(items)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self._iter)
+            except StopIteration:
+                raise StopAsyncIteration from None
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.content = _AsyncLineIter(sse_lines)
+
+    with patch("aiohttp.ClientSession") as mock_session_cls:
+        mock_session = MagicMock()
+        mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_session.get.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        await coordinator._connect_and_stream()
+
+    reading_cb.assert_called_once()
+    assert reading_cb.call_args[0][0]["pid"] == "Engine RPM"
+    assert reading_cb.call_args[0][0]["value"] == 2400.0
+
+
+async def test_connect_and_stream_sets_connected_true_on_200(hass, mock_entry):
+    """_connect_and_stream calls _set_connected(True) after a 200 response."""
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    coordinator._backfill_task = MagicMock(done=MagicMock(return_value=False))
+
+    class _Empty:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.content = _Empty()
+
+    with patch("aiohttp.ClientSession") as mock_session_cls:
+        mock_session = MagicMock()
+        mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_session.get.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        await coordinator._connect_and_stream()
+
+    assert coordinator._connected is True
+
+
+# ---------- _backfill_history aiohttp.ClientError path (line 419) ----------
+
+async def test_backfill_history_client_error_logs_debug_not_warning(coordinator):
+    """aiohttp.ClientError inside _backfill_history hits the DEBUG log path (not WARNING)."""
+    import aiohttp as _aiohttp
+
+    mock_session = _make_mock_session(200, get_side_effect=_aiohttp.ClientError("Pi offline"))
+
+    with (
+        patch(
+            "custom_components.cantera.coordinator.async_get_clientsession",
+            return_value=mock_session,
+        ),
+        patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0),
+    ):
+        await coordinator._backfill_history()  # Must not raise

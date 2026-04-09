@@ -177,7 +177,9 @@ async def test_async_setup_entry_creates_all_pid_sensors(hass, mock_entry, coord
     add_entities = MagicMock(side_effect=lambda entities: added.extend(entities))
     await async_setup_entry(hass, mock_entry, add_entities)
 
-    expected_count = 1 + 1 + len(MODE01_PIDS) + len(MODE09_PIDS)  # sync + firmware_version + mode01 + mode09
+    expected_count = (
+        1 + 1 + len(MODE01_PIDS) + len(MODE09_PIDS)  # sync + firmware_version + mode01 + mode09
+    )
     assert len(added) == expected_count
 
 
@@ -417,7 +419,10 @@ def test_sensor_health_update_triggers_write(sensor):
 
 
 def test_sensor_health_update_always_writes(sensor, coordinator):
-    """_handle_health_update always calls async_write_ha_state (native_value depends on sync_status)."""
+    """_handle_health_update always calls async_write_ha_state.
+
+    (native_value depends on sync_status)
+    """
     coordinator._first_health_received = True
     coordinator._api_reachable = False
     sensor._handle_health_update({})
@@ -551,3 +556,171 @@ def test_mode09_is_diagnostic_flag_set(coordinator):
     live = CanteraSensor(coordinator, "Engine RPM", "rpm", is_diagnostic=False)
     assert diag._is_diagnostic is True
     assert live._is_diagnostic is False
+
+
+# ---------------------------------------------------------------------------
+# async_setup_entry unique_id registration (line 85)
+# ---------------------------------------------------------------------------
+
+async def test_async_setup_entry_registers_unique_ids_in_tracking_set(hass, mock_entry):
+    """async_setup_entry updates current_unique_ids when the key exists in hass.data."""
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    mock_entry.runtime_data = coordinator
+
+    uid_set: set[str] = set()
+    hass.data = {DOMAIN: {mock_entry.entry_id: {"current_unique_ids": uid_set}}}
+
+    add_entities = MagicMock()
+    await async_setup_entry(hass, mock_entry, add_entities)
+
+    # At least the sync-status and firmware-version unique_ids should appear.
+    assert len(uid_set) > 0
+    assert any("sync_status" in uid for uid in uid_set)
+
+
+# ---------------------------------------------------------------------------
+# CanteraSensor.async_added_to_hass (lines 152-161)
+# ---------------------------------------------------------------------------
+
+class TestCanteraSensorLifecycle:
+    async def test_async_added_to_hass_registers_listeners(self, hass, mock_entry):
+        """async_added_to_hass registers reading and health listeners."""
+        from unittest.mock import AsyncMock, patch
+
+        coordinator = CanteraCoordinator(hass, mock_entry)
+        s = CanteraSensor(coordinator, "Engine RPM", "rpm", mock_entry)
+        s.async_write_ha_state = MagicMock()
+
+        with (
+            patch(
+                "homeassistant.components.sensor.RestoreSensor.async_added_to_hass",
+                new_callable=AsyncMock,
+            ),
+            patch.object(
+                s, "async_get_last_sensor_data", new_callable=AsyncMock, return_value=None
+            ),
+        ):
+            await s.async_added_to_hass()
+
+        assert s._handle_reading in coordinator._reading_listeners.get("engine_rpm", [])
+        assert s._handle_health_update in coordinator._health_listeners
+
+    async def test_async_added_to_hass_restores_previous_state(self, hass, mock_entry):
+        """async_added_to_hass restores native_value from the recorder."""
+        from unittest.mock import AsyncMock, patch
+
+        coordinator = CanteraCoordinator(hass, mock_entry)
+        s = CanteraSensor(coordinator, "Engine RPM", "rpm", mock_entry)
+        s.async_write_ha_state = MagicMock()
+
+        last_data = MagicMock()
+        last_data.native_value = 3500.0
+        last_data.native_unit_of_measurement = "rpm"
+
+        with (
+            patch(
+                "homeassistant.components.sensor.RestoreSensor.async_added_to_hass",
+                new_callable=AsyncMock,
+            ),
+            patch.object(
+                s, "async_get_last_sensor_data", new_callable=AsyncMock, return_value=last_data
+            ),
+        ):
+            await s.async_added_to_hass()
+
+        assert s._attr_native_value == 3500.0
+        assert s._restored is True
+
+    async def test_async_will_remove_from_hass_removes_listeners(self, hass, mock_entry):
+        """async_will_remove_from_hass deregisters both reading and health listeners."""
+        from unittest.mock import AsyncMock, patch
+
+        coordinator = CanteraCoordinator(hass, mock_entry)
+        s = CanteraSensor(coordinator, "Engine RPM", "rpm", mock_entry)
+        s.async_write_ha_state = MagicMock()
+
+        with (
+            patch(
+                "homeassistant.components.sensor.RestoreSensor.async_added_to_hass",
+                new_callable=AsyncMock,
+            ),
+            patch.object(
+                s, "async_get_last_sensor_data", new_callable=AsyncMock, return_value=None
+            ),
+        ):
+            await s.async_added_to_hass()
+        await s.async_will_remove_from_hass()
+
+        assert s._handle_reading not in coordinator._reading_listeners.get("engine_rpm", [])
+        assert s._handle_health_update not in coordinator._health_listeners
+
+
+# ---------------------------------------------------------------------------
+# native_value LIVE path (line 207) and should_poll (line 212)
+# ---------------------------------------------------------------------------
+
+def test_native_value_returns_value_when_live(sensor, coordinator):
+    """native_value returns _attr_native_value when sync_status is live."""
+    coordinator._api_reachable = True
+    coordinator._backfilling = False
+    coordinator._car_off_since_mono = None
+    sensor._attr_native_value = 2750.0
+    assert sensor.native_value == 2750.0
+
+
+def test_should_poll_returns_false(sensor):
+    """should_poll is always False — values arrive via SSE push."""
+    assert sensor.should_poll is False
+
+
+# ---------------------------------------------------------------------------
+# CanteraSyncStatusSensor lifecycle (lines 273-280)
+# ---------------------------------------------------------------------------
+
+class TestSyncStatusSensorLifecycle:
+    async def test_async_added_to_hass_registers_health_listener(self, hass, mock_entry):
+        """CanteraSyncStatusSensor registers its health listener on add."""
+        from unittest.mock import AsyncMock, patch
+
+        coordinator = CanteraCoordinator(hass, mock_entry)
+        s = CanteraSyncStatusSensor(coordinator, mock_entry)
+        s.async_write_ha_state = MagicMock()
+
+        with patch(
+            "homeassistant.components.sensor.SensorEntity.async_added_to_hass",
+            new_callable=AsyncMock,
+        ):
+            await s.async_added_to_hass()
+
+        assert s._handle_health_update in coordinator._health_listeners
+
+    async def test_async_will_remove_from_hass_removes_health_listener(self, hass, mock_entry):
+        """CanteraSyncStatusSensor deregisters its health listener on remove."""
+        from unittest.mock import AsyncMock, patch
+
+        coordinator = CanteraCoordinator(hass, mock_entry)
+        s = CanteraSyncStatusSensor(coordinator, mock_entry)
+        s.async_write_ha_state = MagicMock()
+
+        with patch(
+            "homeassistant.components.sensor.SensorEntity.async_added_to_hass",
+            new_callable=AsyncMock,
+        ):
+            await s.async_added_to_hass()
+        await s.async_will_remove_from_hass()
+
+        assert s._handle_health_update not in coordinator._health_listeners
+
+
+# ---------------------------------------------------------------------------
+# CanteraFirmwareVersionSensor.device_info (line 318)
+# ---------------------------------------------------------------------------
+
+def test_firmware_version_sensor_device_info(hass, mock_entry):
+    """CanteraFirmwareVersionSensor.device_info delegates to coordinator."""
+    from custom_components.cantera.sensor import CanteraFirmwareVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareVersionSensor(coordinator, mock_entry)
+    # device_info is a computed property — compare equality, not identity.
+    assert s.device_info == coordinator.device_info

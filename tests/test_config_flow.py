@@ -7,6 +7,7 @@ from custom_components.cantera.config_flow import (
     CanteraConfigFlow,
     ConnectionResult,
     _get_device_info,
+    _test_connection,
 )
 from custom_components.cantera.const import CONF_HOST, CONF_PORT, DEFAULT_PORT
 
@@ -300,3 +301,117 @@ async def test_reconfigure_strips_host_whitespace(mock_conn, reconfig_flow):
     )
     call_kwargs = flow.async_update_reload_and_abort.call_args
     assert call_kwargs[1]["data"][CONF_HOST] == "10.0.0.99"
+
+
+# ---------------------------------------------------------------------------
+# Direct _test_connection unit tests (covers lines 44-65 of config_flow.py)
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_session(resp_status: int = 200):
+    mock_resp = AsyncMock()
+    mock_resp.status = resp_status
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=False)
+    mock_session = MagicMock()
+    mock_session.get = MagicMock(return_value=mock_resp)
+    return mock_session
+
+
+def _conn_error(errno_val: int | None):
+    """Build a ClientConnectorError whose os_error.errno matches errno_val."""
+    import aiohttp
+    os_err = OSError(errno_val, "test") if errno_val is not None else OSError("no errno")
+    if errno_val is None:
+        os_err.errno = None  # type: ignore[assignment]
+    return aiohttp.ClientConnectorError(None, os_err)
+
+
+async def test_test_connection_200_returns_ok(hass):
+    """200 response → ConnectionResult.OK."""
+    mock_session = _make_mock_session(200)
+    with patch(
+        "custom_components.cantera.config_flow.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        result = await _test_connection("192.168.1.100", 8080, hass)
+    assert result == ConnectionResult.OK
+
+
+async def test_test_connection_non_200_returns_cannot_connect(hass):
+    """Non-200 response → ConnectionResult.CANNOT_CONNECT."""
+    mock_session = _make_mock_session(503)
+    with patch(
+        "custom_components.cantera.config_flow.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        result = await _test_connection("192.168.1.100", 8080, hass)
+    assert result == ConnectionResult.CANNOT_CONNECT
+
+
+async def test_test_connection_econnrefused_returns_connection_refused(hass):
+    """ECONNREFUSED (errno 111) → ConnectionResult.CONNECTION_REFUSED."""
+    exc = _conn_error(111)
+    mock_session = MagicMock()
+    mock_session.get.return_value.__aenter__ = AsyncMock(side_effect=exc)
+    mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+    with patch(
+        "custom_components.cantera.config_flow.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        result = await _test_connection("192.168.1.100", 8080, hass)
+    assert result == ConnectionResult.CONNECTION_REFUSED
+
+
+async def test_test_connection_enetunreach_returns_host_unreachable(hass):
+    """ENETUNREACH (errno 101) → ConnectionResult.HOST_UNREACHABLE."""
+    exc = _conn_error(101)
+    mock_session = MagicMock()
+    mock_session.get.return_value.__aenter__ = AsyncMock(side_effect=exc)
+    mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+    with patch(
+        "custom_components.cantera.config_flow.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        result = await _test_connection("192.168.1.100", 8080, hass)
+    assert result == ConnectionResult.HOST_UNREACHABLE
+
+
+async def test_test_connection_ehostunreach_returns_host_unreachable(hass):
+    """EHOSTUNREACH (errno 113) → ConnectionResult.HOST_UNREACHABLE."""
+    exc = _conn_error(113)
+    mock_session = MagicMock()
+    mock_session.get.return_value.__aenter__ = AsyncMock(side_effect=exc)
+    mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+    with patch(
+        "custom_components.cantera.config_flow.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        result = await _test_connection("192.168.1.100", 8080, hass)
+    assert result == ConnectionResult.HOST_UNREACHABLE
+
+
+async def test_test_connection_no_os_error_returns_host_unreachable(hass):
+    """ClientConnectorError with os_error=None → ConnectionResult.HOST_UNREACHABLE."""
+    exc = _conn_error(None)
+    mock_session = MagicMock()
+    mock_session.get.return_value.__aenter__ = AsyncMock(side_effect=exc)
+    mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+    with patch(
+        "custom_components.cantera.config_flow.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        result = await _test_connection("192.168.1.100", 8080, hass)
+    assert result == ConnectionResult.HOST_UNREACHABLE
+
+
+async def test_test_connection_generic_exception_returns_cannot_connect(hass):
+    """An unexpected exception → ConnectionResult.CANNOT_CONNECT."""
+    mock_session = MagicMock()
+    mock_session.get = MagicMock(side_effect=RuntimeError("unexpected"))
+    with patch(
+        "custom_components.cantera.config_flow.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        result = await _test_connection("192.168.1.100", 8080, hass)
+    assert result == ConnectionResult.CANNOT_CONNECT
