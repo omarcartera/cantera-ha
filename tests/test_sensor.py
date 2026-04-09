@@ -12,6 +12,7 @@ from custom_components.cantera.const import (
     DOMAIN,
     MODE01_PIDS,
     MODE09_PIDS,
+    SYNC_CAR_OFF_DEBOUNCE_S,
     SYNC_STALE_THRESHOLD_S,
     SYNC_STATUS_API_OFFLINE,
     SYNC_STATUS_CAR_OFF,
@@ -266,25 +267,29 @@ def test_sync_status_api_offline_by_default(sync_sensor, coordinator):
 
 
 def test_sync_status_car_off_when_can_not_connected(coordinator):
-    """API reachable but can_connected=False → car_off."""
+    """API reachable but can_connected=False → car_off after debounce."""
     coordinator._api_reachable = True
     coordinator._health_data = {"can_connected": False, "last_reading_ms": 0}
+    # Simulate debounce window having elapsed.
+    coordinator._car_off_since_mono = time.monotonic() - SYNC_CAR_OFF_DEBOUNCE_S - 1
     assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
 
 
 def test_sync_status_car_off_when_no_reading(coordinator):
-    """API reachable, CAN connected, but last_reading_ms=0 → car_off."""
+    """API reachable, CAN connected, but last_reading_ms=0 → car_off after debounce."""
     coordinator._api_reachable = True
     coordinator._health_data = {"can_connected": True, "last_reading_ms": 0}
+    coordinator._car_off_since_mono = time.monotonic() - SYNC_CAR_OFF_DEBOUNCE_S - 1
     assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
 
 
 def test_sync_status_car_off_when_reading_stale(coordinator):
-    """API reachable, CAN connected, but reading older than threshold → car_off."""
+    """API reachable, CAN connected, but reading older than threshold → car_off after debounce."""
     coordinator._api_reachable = True
     now_ms = int(time.time() * 1000)
     stale_ms = now_ms - (SYNC_STALE_THRESHOLD_S + 10) * 1000
     coordinator._health_data = {"can_connected": True, "last_reading_ms": stale_ms}
+    coordinator._car_off_since_mono = time.monotonic() - SYNC_CAR_OFF_DEBOUNCE_S - 1
     assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
 
 
@@ -293,6 +298,26 @@ def test_sync_status_live_when_recent_reading(coordinator):
     coordinator._api_reachable = True
     now_ms = int(time.time() * 1000)
     coordinator._health_data = {"can_connected": True, "last_reading_ms": now_ms - 5000}
+    assert coordinator.sync_status == SYNC_STATUS_LIVE
+
+
+def test_sync_status_live_during_car_off_debounce_window(coordinator):
+    """car_off condition not yet persisted for full debounce → stay live."""
+    coordinator._api_reachable = True
+    coordinator._health_data = {"can_connected": False, "last_reading_ms": 0}
+    # Just started — debounce timer set to 1 second ago, well within 30 s window.
+    coordinator._car_off_since_mono = time.monotonic() - 1
+    assert coordinator.sync_status == SYNC_STATUS_LIVE
+
+
+def test_sync_status_car_off_resets_on_live(coordinator):
+    """Once live data comes back, _car_off_since_mono is cleared."""
+    coordinator._api_reachable = True
+    coordinator._car_off_since_mono = time.monotonic() - SYNC_CAR_OFF_DEBOUNCE_S - 5
+    now_ms = int(time.time() * 1000)
+    coordinator._health_data = {"can_connected": True, "last_reading_ms": now_ms - 1000}
+    coordinator._update_car_off_debounce()
+    assert coordinator._car_off_since_mono is None
     assert coordinator.sync_status == SYNC_STATUS_LIVE
 
 
@@ -345,10 +370,11 @@ def test_sensor_unavailable_when_api_offline(sensor, coordinator):
 
 
 def test_sensor_unavailable_when_car_off(sensor, coordinator):
-    """Sensor reports unavailable when car is off (no recent reading)."""
+    """Sensor reports unavailable when car is off (no recent reading, debounce elapsed)."""
     coordinator._first_health_received = True
     coordinator._api_reachable = True
     coordinator._health_data = {"can_connected": False, "last_reading_ms": 0}
+    coordinator._car_off_since_mono = time.monotonic() - SYNC_CAR_OFF_DEBOUNCE_S - 1
     assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
     assert sensor.available is False
 

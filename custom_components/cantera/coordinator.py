@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 from collections import defaultdict
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -26,6 +27,7 @@ from .const import (
     SSE_ENDPOINT,
     SSE_EVENT_TYPE_OBD,
     SSE_RECONNECT_DELAY_S,
+    SYNC_CAR_OFF_DEBOUNCE_S,
     SYNC_STALE_THRESHOLD_S,
     SYNC_STATUS_API_OFFLINE,
     SYNC_STATUS_CAR_OFF,
@@ -72,6 +74,11 @@ class CanteraCoordinator:
         self._health_poll_running: bool = False
         # Task for the immediate first health poll fired from start().
         self._initial_health_task: asyncio.Task | None = None
+        # Monotonic timestamp (time.monotonic()) of when the car-off condition
+        # was first detected.  None means the last health poll was live.
+        # Used to debounce rapid live→car_off→live oscillations caused by
+        # brief ECU keep-alive retries between successful OBD sessions.
+        self._car_off_since_mono: float | None = None
 
     # ------------------------------------------------------------------
     # Public API — SSE readings
@@ -131,21 +138,22 @@ class CanteraCoordinator:
         States (in priority order):
         - ``api_offline``: /api/health is unreachable (Pi is down / no network).
         - ``syncing``:     API reachable, history backfill is in progress.
-        - ``car_off``:     API reachable, CAN not connected or readings stale.
-        - ``live``:        API reachable, CAN connected, recent reading (<30 s).
+        - ``car_off``:     API reachable, CAN not connected or readings stale,
+                           AND the car-off condition has persisted for at least
+                           SYNC_CAR_OFF_DEBOUNCE_S seconds.
+        - ``live``:        API reachable, CAN connected, recent reading (<30 s),
+                           or still within the car-off debounce window.
         """
         if not self._api_reachable:
             return SYNC_STATUS_API_OFFLINE
         if self._backfilling:
             return SYNC_STATUS_SYNCING
-        if not self._health_data.get("can_connected", False):
-            return SYNC_STATUS_CAR_OFF
-        last_ms: int = self._health_data.get("last_reading_ms", 0)
-        if last_ms == 0:
-            return SYNC_STATUS_CAR_OFF
-        now_ms = int(datetime.now(UTC).timestamp() * 1000)
-        if (now_ms - last_ms) > SYNC_STALE_THRESHOLD_S * 1000:
-            return SYNC_STATUS_CAR_OFF
+        # Declare car_off only after the condition has persisted long enough.
+        # This prevents the sensor from flickering when the ECU briefly stops
+        # responding between OBD poll cycles but quickly comes back.
+        if self._car_off_since_mono is not None:
+            if time.monotonic() - self._car_off_since_mono >= SYNC_CAR_OFF_DEBOUNCE_S:
+                return SYNC_STATUS_CAR_OFF
         return SYNC_STATUS_LIVE
 
     def add_health_listener(self, cb: Callable[[dict], None]) -> None:
@@ -163,6 +171,26 @@ class CanteraCoordinator:
                 cb(self._health_data)
             except Exception:
                 _LOGGER.exception("Health listener %r raised an exception", cb)
+
+    def _update_car_off_debounce(self) -> None:
+        """Update the car-off debounce timer from the latest health data.
+
+        Must be called after ``_health_data`` is updated on each successful
+        health poll, before notifying listeners so that ``sync_status`` is
+        already correct when callbacks read it.
+        """
+        connected = self._health_data.get("can_connected", False)
+        last_ms: int = self._health_data.get("last_reading_ms", 0)
+        now_ms = int(datetime.now(UTC).timestamp() * 1000)
+        is_live = (
+            connected
+            and last_ms > 0
+            and (now_ms - last_ms) <= SYNC_STALE_THRESHOLD_S * 1000
+        )
+        if is_live:
+            self._car_off_since_mono = None
+        elif self._car_off_since_mono is None:
+            self._car_off_since_mono = time.monotonic()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -222,6 +250,7 @@ class CanteraCoordinator:
                         if not self._api_reachable:
                             self._api_reachable = True
                         self._first_health_received = True
+                        self._update_car_off_debounce()
                         self._notify_health_listeners()
                         return
             except Exception:

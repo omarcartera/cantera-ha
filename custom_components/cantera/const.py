@@ -47,6 +47,10 @@ SYNC_STATUS_CAR_OFF = "car_off"
 SYNC_STATUS_SYNCING = "syncing"
 SYNC_STATUS_API_OFFLINE = "api_offline"
 SYNC_STALE_THRESHOLD_S = 30  # seconds before a reading timestamp is considered stale
+# How long car-off condition must persist before sync_status flips to "car_off".
+# This prevents rapid oscillation when the ECU briefly stops responding between
+# successful OBD poll cycles (e.g. during ECU keep-alive retries).
+SYNC_CAR_OFF_DEBOUNCE_S = 30
 
 # Unit -> HA device_class mapping
 UNIT_DEVICE_CLASS_MAP = {
