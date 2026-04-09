@@ -8,6 +8,14 @@
           "host": "Host (local IP address or hostname)",
           "port": "Port"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure CANtera",
+        "description": "Update the host or port for your CANtera device.",
+        "data": {
+          "host": "Host (local IP address or hostname)",
+          "port": "Port"
+        }
       }
     },
     "error": {

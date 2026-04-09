@@ -222,3 +222,81 @@ async def test_already_configured_aborts(mock_device, mock_conn, flow):
         await flow.async_step_user(
             user_input={CONF_HOST: "192.168.1.100", CONF_PORT: DEFAULT_PORT}
         )
+
+
+# ---------------------------------------------------------------------------
+# Reconfigure flow tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def reconfig_flow(hass):
+    """Create a reconfigure flow with a mock entry."""
+    f = CanteraConfigFlow()
+    f.hass = hass
+    mock_entry = MagicMock()
+    mock_entry.data = {CONF_HOST: "10.0.0.1", CONF_PORT: DEFAULT_PORT}
+    f._get_reconfigure_entry = MagicMock(return_value=mock_entry)
+    return f, mock_entry
+
+
+async def test_reconfigure_form_shows(reconfig_flow):
+    """Reconfigure step shows form with current values pre-filled."""
+    flow, _entry = reconfig_flow
+    result = await flow.async_step_reconfigure(user_input=None)
+    assert result["type"] == "form"
+    assert result["step_id"] == "reconfigure"
+
+
+@patch(
+    "custom_components.cantera.config_flow._test_connection",
+    new_callable=AsyncMock,
+    return_value=ConnectionResult.OK,
+)
+async def test_reconfigure_success_updates_and_aborts(mock_conn, reconfig_flow):
+    """Successful reconfigure calls async_update_reload_and_abort."""
+    flow, entry = reconfig_flow
+    flow.async_update_reload_and_abort = MagicMock(
+        return_value={"type": "abort", "reason": "reconfigure_successful"}
+    )
+    result = await flow.async_step_reconfigure(
+        user_input={CONF_HOST: "10.0.0.99", CONF_PORT: 8080}
+    )
+    assert result["type"] == "abort"
+    flow.async_update_reload_and_abort.assert_called_once()
+    call_kwargs = flow.async_update_reload_and_abort.call_args
+    assert call_kwargs[1]["data"][CONF_HOST] == "10.0.0.99"
+    assert call_kwargs[1]["data"][CONF_PORT] == 8080
+
+
+@patch(
+    "custom_components.cantera.config_flow._test_connection",
+    new_callable=AsyncMock,
+    return_value=ConnectionResult.CANNOT_CONNECT,
+)
+async def test_reconfigure_connection_failure_shows_error(mock_conn, reconfig_flow):
+    """Connection failure during reconfigure re-shows the form with an error."""
+    flow, _entry = reconfig_flow
+    result = await flow.async_step_reconfigure(
+        user_input={CONF_HOST: "10.0.0.99", CONF_PORT: DEFAULT_PORT}
+    )
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == ConnectionResult.CANNOT_CONNECT.value
+
+
+@patch(
+    "custom_components.cantera.config_flow._test_connection",
+    new_callable=AsyncMock,
+    return_value=ConnectionResult.OK,
+)
+async def test_reconfigure_strips_host_whitespace(mock_conn, reconfig_flow):
+    """Whitespace is stripped from host during reconfigure."""
+    flow, _entry = reconfig_flow
+    flow.async_update_reload_and_abort = MagicMock(
+        return_value={"type": "abort", "reason": "reconfigure_successful"}
+    )
+    await flow.async_step_reconfigure(
+        user_input={CONF_HOST: "  10.0.0.99  ", CONF_PORT: DEFAULT_PORT}
+    )
+    call_kwargs = flow.async_update_reload_and_abort.call_args
+    assert call_kwargs[1]["data"][CONF_HOST] == "10.0.0.99"

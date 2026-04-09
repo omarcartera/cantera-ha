@@ -37,6 +37,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate old config entry to the current version."""
+    if entry.version == 1:
+        return True
+    return False
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a CANtera config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):

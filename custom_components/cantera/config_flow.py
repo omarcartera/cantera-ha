@@ -117,3 +117,32 @@ class CanteraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors,
         )
+
+    async def async_step_reconfigure(self, user_input=None) -> FlowResult:
+        """Allow the user to update host/port without removing the entry."""
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            host = user_input[CONF_HOST].strip()
+            port = user_input[CONF_PORT]
+            result = await _test_connection(host, port, self.hass)
+            if result == ConnectionResult.OK:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data={**entry.data, CONF_HOST: host, CONF_PORT: port},
+                )
+            errors["base"] = result.value
+
+        current_host = entry.data.get(CONF_HOST, "")
+        current_port = entry.data.get(CONF_PORT, DEFAULT_PORT)
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_HOST, default=current_host): str,
+                    vol.Optional(CONF_PORT, default=current_port): int,
+                }
+            ),
+            errors=errors,
+        )
