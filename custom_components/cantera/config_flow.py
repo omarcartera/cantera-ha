@@ -57,7 +57,7 @@ async def _test_connection(host: str, port: int, hass) -> ConnectionResult:
             # ECONNREFUSED=111 means the host is up but nothing is listening.
             if errno_val == 111:
                 return ConnectionResult.CONNECTION_REFUSED
-            # EHOSTUNREACH=113, ENETUNREACH=101 — routing failure (e.g. Tailscale).
+            # EHOSTUNREACH=113, ENETUNREACH=101 — routing failure.
             if errno_val in (101, 113):
                 return ConnectionResult.HOST_UNREACHABLE
         return ConnectionResult.HOST_UNREACHABLE

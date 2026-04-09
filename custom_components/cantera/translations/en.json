@@ -3,9 +3,9 @@
     "step": {
       "user": {
         "title": "Connect to CANtera",
-        "description": "Enter the local IP address of the Raspberry Pi running the CANtera OBD-II logger.\n\nUse the Pi's **local network IP** (e.g. `192.168.x.x`). Tailscale IPs (`100.x.x.x`) require the Tailscale add-on with subnet routing enabled in Home Assistant.\n\nStart CANtera with `cantera -b 500000 log-obd --api` to enable the HTTP API.",
+        "description": "Enter the IP address or hostname of the Raspberry Pi running the CANtera OBD-II logger.\n\nYou can use the Pi's local network IP (e.g. `192.168.x.x`), a hostname, or a Tailscale IP (`100.x.x.x`) if Home Assistant is also connected to your Tailscale network.\n\nStart CANtera with `cantera -b 500000 log-obd --api` to enable the HTTP API.",
         "data": {
-          "host": "Host (local IP address or hostname)",
+          "host": "Host (IP address or hostname)",
           "port": "Port"
         }
       },
@@ -13,14 +13,14 @@
         "title": "Reconfigure CANtera",
         "description": "Update the host or port for your CANtera device.",
         "data": {
-          "host": "Host (local IP address or hostname)",
+          "host": "Host (IP address or hostname)",
           "port": "Port"
         }
       }
     },
     "error": {
       "cannot_connect": "Unable to connect to the CANtera API. Check that the Pi is reachable and running `cantera log-obd --api`.",
-      "host_unreachable": "Host unreachable. Verify the IP address and network routing. Tailscale IPs require the Tailscale add-on with subnet routing — use the local IP instead.",
+      "host_unreachable": "Host unreachable. Verify the IP address, that the Pi is powered on, and that it is reachable from Home Assistant (check firewall and network routing).",
       "connection_refused": "Connection refused. The host is reachable but CANtera is not listening on this port. Start it with `cantera log-obd --api`."
     },
     "abort": {
