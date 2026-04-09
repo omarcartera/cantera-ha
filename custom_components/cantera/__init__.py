@@ -15,6 +15,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = CanteraCoordinator(hass, entry)
     entry.runtime_data = coordinator
     coordinator.start()
+    entry.async_on_unload(coordinator.stop)
 
     if not hass.services.has_service(DOMAIN, "reconnect"):
         async def _handle_reconnect(call: ServiceCall) -> None:

@@ -67,6 +67,10 @@ class CanteraCoordinator:
         self._backfill_task: asyncio.Task | None = None
         # Set True when the first successful /api/health response arrives.
         self._first_health_received: bool = False
+        # Guard against concurrent health poll invocations.
+        self._health_poll_running: bool = False
+        # Task for the immediate first health poll fired from start().
+        self._initial_health_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Public API — SSE readings
@@ -90,8 +94,11 @@ class CanteraCoordinator:
         """Update connection state and notify listeners."""
         if self._connected != value:
             self._connected = value
-            for cb in self._connection_listeners:
-                cb()
+            for cb in list(self._connection_listeners):
+                try:
+                    cb()
+                except Exception:
+                    _LOGGER.exception("Connection listener %r raised an exception", cb)
 
     def add_reading_listener(self, cb: Callable[[dict], None]) -> None:
         """Register a callback invoked for each live SSE reading."""
@@ -150,8 +157,11 @@ class CanteraCoordinator:
             self._health_listeners.remove(cb)
 
     def _notify_health_listeners(self) -> None:
-        for cb in self._health_listeners:
-            cb(self._health_data)
+        for cb in list(self._health_listeners):
+            try:
+                cb(self._health_data)
+            except Exception:
+                _LOGGER.exception("Health listener %r raised an exception", cb)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -166,13 +176,18 @@ class CanteraCoordinator:
             timedelta(seconds=HEALTH_POLL_INTERVAL_S),
         )
         # Run an immediate first poll without waiting for the interval.
-        self._hass.async_create_task(self._poll_health())
+        self._initial_health_task = self._hass.async_create_task(self._poll_health())
 
     async def stop(self) -> None:
         """Stop the SSE loop, health polling, and any in-progress backfill."""
         if self._health_unsub is not None:
             self._health_unsub()
             self._health_unsub = None
+        if self._initial_health_task and not self._initial_health_task.done():
+            self._initial_health_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._initial_health_task
+            self._initial_health_task = None
         self._set_connected(False)
         self._api_reachable = False
         if self._backfill_task and not self._backfill_task.done():
@@ -192,39 +207,48 @@ class CanteraCoordinator:
 
     async def _poll_health(self, _now=None) -> None:
         """Poll /api/health and update reachability state."""
-        url = f"{self._base_url}{HEALTH_ENDPOINT}"
+        if self._health_poll_running:
+            return
+        self._health_poll_running = True
         try:
-            session = async_get_clientsession(self._hass)
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
-                if resp.status == 200:
-                    self._health_data = await resp.json()
-                    self._consecutive_health_failures = 0
-                    if not self._api_reachable:
-                        self._api_reachable = True
-                    self._first_health_received = True
-                    self._notify_health_listeners()
-                    return
-        except Exception:
-            pass
+            url = f"{self._base_url}{HEALTH_ENDPOINT}"
+            try:
+                session = async_get_clientsession(self._hass)
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    if resp.status == 200:
+                        self._health_data = await resp.json()
+                        self._consecutive_health_failures = 0
+                        if not self._api_reachable:
+                            self._api_reachable = True
+                        self._first_health_received = True
+                        self._notify_health_listeners()
+                        return
+            except Exception:
+                pass
 
-        self._consecutive_health_failures += 1
-        if (
-            self._consecutive_health_failures >= HEALTH_FAIL_THRESHOLD
-            and self._api_reachable
-        ):
-            self._api_reachable = False
-            self._health_data = {}
-            self._notify_health_listeners()
+            self._consecutive_health_failures += 1
+            if (
+                self._consecutive_health_failures >= HEALTH_FAIL_THRESHOLD
+                and self._api_reachable
+            ):
+                self._api_reachable = False
+                self._health_data = {}
+                self._notify_health_listeners()
+        finally:
+            self._health_poll_running = False
 
     # ------------------------------------------------------------------
     # Internal — SSE
     # ------------------------------------------------------------------
 
     async def _sse_loop(self) -> None:
-        """Connect to SSE stream, reconnect on disconnect."""
+        """Connect to SSE stream, reconnect with exponential backoff on error."""
+        delay = SSE_RECONNECT_DELAY_S
         while True:
             try:
                 await self._connect_and_stream()
+                # Successful connection — reset backoff.
+                delay = SSE_RECONNECT_DELAY_S
             except asyncio.CancelledError:
                 self._set_connected(False)
                 return
@@ -232,10 +256,11 @@ class CanteraCoordinator:
                 _LOGGER.warning(
                     "SSE connection error: %s — retrying in %ds",
                     exc,
-                    SSE_RECONNECT_DELAY_S,
+                    delay,
                 )
                 self._set_connected(False)
-            await asyncio.sleep(SSE_RECONNECT_DELAY_S)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 60)
 
     async def _connect_and_stream(self) -> None:
         """Start backfill concurrently then stream live SSE data.
@@ -276,8 +301,13 @@ class CanteraCoordinator:
                                 self._pid_units[reading["pid"]] = reading.get(
                                     "unit", ""
                                 )
-                                for cb in self._listeners:
-                                    cb(reading)
+                                for cb in list(self._listeners):
+                                    try:
+                                        cb(reading)
+                                    except Exception:
+                                        _LOGGER.exception(
+                                            "Reading listener %r raised an exception", cb
+                                        )
                             except (json.JSONDecodeError, KeyError):
                                 _LOGGER.debug("Malformed SSE data: %s", data_str)
                     elif text == "":
