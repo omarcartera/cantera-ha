@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from homeassistant.components.sensor import (
     RestoreSensor,
@@ -21,6 +22,7 @@ from .const import (
     DOMAIN,
     MODE01_PIDS,
     MODE09_PIDS,
+    SENSOR_API_OFFLINE_GRACE_S,
     SYNC_STATUS_API_OFFLINE,
     SYNC_STATUS_CAR_OFF,
     SYNC_STATUS_LIVE,
@@ -127,7 +129,10 @@ class CanteraSensor(RestoreSensor):
 
         self._slug = slug
         self._restored = False
-        self._available_cache: bool | None = None
+        # Monotonic timestamp of the last SSE reading received while live.
+        # Used to determine how long the API has been offline so we can show
+        # the last-known value during brief outages instead of jumping to 0.
+        self._last_live_at: float = 0.0
 
     async def async_added_to_hass(self) -> None:
         """Register callbacks and restore state when added to HA."""
@@ -149,19 +154,35 @@ class CanteraSensor(RestoreSensor):
 
     @property
     def available(self) -> bool:
-        """Sensor is available while live data flows, or while holding restored state.
+        """Always True — car_off and api_offline show 0 instead of unavailable.
 
-        During the startup grace period (before any health response arrives) the
-        sensor is optimistically shown as available.  If state was restored from
-        HA storage and a live reading has not yet arrived, the restored value is
-        also shown as available.  Once live data flows the normal coordinator
-        check takes over.
+        Keeping sensors available prevents Lovelace cards from disappearing or
+        showing an error banner.  State is communicated via ``native_value``
+        (0 when car is off, last-known value / 0 when API is offline) and via
+        the dedicated sync-status sensor.
         """
-        if not self._coordinator._first_health_received:
-            return True
-        if self._restored and self._attr_native_value is not None:
-            return True
-        return self._coordinator.sync_status == SYNC_STATUS_LIVE
+        return True
+
+    @property
+    def native_value(self):
+        """Return sensor reading, or a graceful fallback when data is absent.
+
+        - ``live`` / ``syncing``: last SSE reading (or None before first read).
+        - ``car_off``: 0 — car is parked, all measurements are effectively 0.
+        - ``api_offline``: last-known value for up to SENSOR_API_OFFLINE_GRACE_S,
+          then 0.  This masks brief Pi reboots without permanently freezing values.
+        """
+        status = self._coordinator.sync_status
+        if status == SYNC_STATUS_CAR_OFF:
+            return 0
+        if status == SYNC_STATUS_API_OFFLINE:
+            grace_elapsed = (
+                time.monotonic() - self._last_live_at if self._last_live_at else float("inf")
+            )
+            if grace_elapsed < SENSOR_API_OFFLINE_GRACE_S:
+                return self._attr_native_value  # last-known value during grace window
+            return 0
+        return self._attr_native_value
 
     @property
     def should_poll(self) -> bool:
@@ -172,16 +193,18 @@ class CanteraSensor(RestoreSensor):
     def _handle_reading(self, reading: dict) -> None:
         """Update value when a reading for this sensor's PID arrives."""
         self._restored = False
+        self._last_live_at = time.monotonic()
         self._attr_native_value = reading.get("value")
         self.async_write_ha_state()
 
     @callback
     def _handle_health_update(self, _health_data: dict) -> None:
-        """Re-evaluate availability whenever the health state changes."""
-        new_available = self.available
-        if new_available != self._available_cache:
-            self._available_cache = new_available
-            self.async_write_ha_state()
+        """Re-evaluate state whenever health data changes.
+
+        ``native_value`` depends on ``sync_status`` so we must write state on
+        every health change, not only when ``available`` flips.
+        """
+        self.async_write_ha_state()
 
 
 # ---------------------------------------------------------------------------

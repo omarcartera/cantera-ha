@@ -79,6 +79,10 @@ class CanteraCoordinator:
         # Used to debounce rapid live→car_off→live oscillations caused by
         # brief ECU keep-alive retries between successful OBD sessions.
         self._car_off_since_mono: float | None = None
+        # True once at least one health poll has confirmed a live reading.
+        # The car-off debounce is suppressed until we've seen live data so
+        # that startup and reconnect windows don't falsely report "live".
+        self._was_ever_live: bool = False
 
     # ------------------------------------------------------------------
     # Public API — SSE readings
@@ -178,6 +182,10 @@ class CanteraCoordinator:
         Must be called after ``_health_data`` is updated on each successful
         health poll, before notifying listeners so that ``sync_status`` is
         already correct when callbacks read it.
+
+        The timer only starts once we have confirmed at least one live reading
+        so that startup and post-outage reconnect windows are not falsely
+        reported as "live" during the debounce window.
         """
         connected = self._health_data.get("can_connected", False)
         last_ms: int = self._health_data.get("last_reading_ms", 0)
@@ -188,8 +196,10 @@ class CanteraCoordinator:
             and (now_ms - last_ms) <= SYNC_STALE_THRESHOLD_S * 1000
         )
         if is_live:
+            self._was_ever_live = True
             self._car_off_since_mono = None
-        elif self._car_off_since_mono is None:
+        elif self._was_ever_live and self._car_off_since_mono is None:
+            # Only start debounce after we've observed live data at least once.
             self._car_off_since_mono = time.monotonic()
 
     # ------------------------------------------------------------------
@@ -263,6 +273,10 @@ class CanteraCoordinator:
             ):
                 self._api_reachable = False
                 self._health_data = {}
+                # Suspend the car-off debounce timer during API outages.
+                # We have no fresh evidence either way, so don't let stale
+                # elapsed time count toward the debounce threshold.
+                self._car_off_since_mono = None
                 self._notify_health_listeners()
         finally:
             self._health_poll_running = False

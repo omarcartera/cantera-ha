@@ -12,6 +12,7 @@ from custom_components.cantera.const import (
     DOMAIN,
     MODE01_PIDS,
     MODE09_PIDS,
+    SENSOR_API_OFFLINE_GRACE_S,
     SYNC_CAR_OFF_DEBOUNCE_S,
     SYNC_STALE_THRESHOLD_S,
     SYNC_STATUS_API_OFFLINE,
@@ -360,23 +361,25 @@ def test_sensor_available_during_startup_grace(sensor, coordinator):
     assert sensor.available is True
 
 
-def test_sensor_unavailable_when_api_offline(sensor, coordinator):
-    """Sensor reports unavailable when sync_status is api_offline."""
+def test_sensor_always_available_when_api_offline(sensor, coordinator):
+    """Sensor stays available when API is offline — shows 0 instead of unavailable."""
     coordinator._first_health_received = True
     coordinator._api_reachable = False
-    # No health data → api_offline
     assert coordinator.sync_status == SYNC_STATUS_API_OFFLINE
-    assert sensor.available is False
+    assert sensor.available is True
+    # Grace window not elapsed (last_live_at=0 → infinite elapsed → 0)
+    assert sensor.native_value == 0
 
 
-def test_sensor_unavailable_when_car_off(sensor, coordinator):
-    """Sensor reports unavailable when car is off (no recent reading, debounce elapsed)."""
+def test_sensor_always_available_when_car_off(sensor, coordinator):
+    """Sensor stays available and reports 0 when car is off (debounce elapsed)."""
     coordinator._first_health_received = True
     coordinator._api_reachable = True
     coordinator._health_data = {"can_connected": False, "last_reading_ms": 0}
     coordinator._car_off_since_mono = time.monotonic() - SYNC_CAR_OFF_DEBOUNCE_S - 1
     assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
-    assert sensor.available is False
+    assert sensor.available is True
+    assert sensor.native_value == 0
 
 
 def test_sensor_available_when_live(sensor, coordinator):
@@ -392,8 +395,8 @@ def test_sensor_available_when_live(sensor, coordinator):
     assert sensor.available is True
 
 
-def test_sensor_unavailable_during_syncing(sensor, coordinator):
-    """Sensor is unavailable while backfill is in progress (not yet live)."""
+def test_sensor_available_during_syncing(sensor, coordinator):
+    """Sensor stays available while backfill is in progress."""
     import time as _time
     coordinator._first_health_received = True
     coordinator._api_reachable = True
@@ -402,9 +405,8 @@ def test_sensor_unavailable_during_syncing(sensor, coordinator):
         "can_connected": True,
         "last_reading_ms": int(_time.time() * 1000) - 2000,
     }
-    # syncing ≠ live
     assert coordinator.sync_status == SYNC_STATUS_SYNCING
-    assert sensor.available is False
+    assert sensor.available is True
 
 
 def test_sensor_health_update_triggers_write(sensor):
@@ -414,14 +416,84 @@ def test_sensor_health_update_triggers_write(sensor):
     sensor.async_write_ha_state.assert_called_once()
 
 
-def test_sensor_health_update_no_write_when_unchanged(sensor, coordinator):
-    """_handle_health_update skips write when availability has not changed."""
-    coordinator._first_health_received = True  # Exit grace period
-    coordinator._api_reachable = False  # api_offline → unavailable
-    # Prime the cache
+def test_sensor_health_update_always_writes(sensor, coordinator):
+    """_handle_health_update always calls async_write_ha_state (native_value depends on sync_status)."""
+    coordinator._first_health_received = True
+    coordinator._api_reachable = False
     sensor._handle_health_update({})
     sensor.async_write_ha_state.reset_mock()
-    # Call again with same availability → no extra write
+    # Second call with same state still writes — native_value may have changed
     sensor._handle_health_update({})
-    sensor.async_write_ha_state.assert_not_called()
+    sensor.async_write_ha_state.assert_called_once()
 
+
+# ---------- native_value fallback behaviour ----------
+
+def test_native_value_zero_when_car_off(sensor, coordinator):
+    """native_value returns 0 when car is off (no blanking cards)."""
+    coordinator._api_reachable = True
+    coordinator._car_off_since_mono = time.monotonic() - SYNC_CAR_OFF_DEBOUNCE_S - 1
+    assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
+    sensor._attr_native_value = 42.0
+    assert sensor.native_value == 0
+
+
+def test_native_value_last_known_during_api_offline_grace(sensor, coordinator):
+    """During API offline grace window, native_value returns last-known reading."""
+    coordinator._api_reachable = False
+    assert coordinator.sync_status == SYNC_STATUS_API_OFFLINE
+    sensor._attr_native_value = 88.0
+    sensor._last_live_at = time.monotonic() - 5  # 5 s ago, within 60 s grace
+    assert sensor.native_value == 88.0
+
+
+def test_native_value_zero_after_api_offline_grace_expires(sensor, coordinator):
+    """After grace window expires, native_value zeros out on api_offline."""
+    coordinator._api_reachable = False
+    assert coordinator.sync_status == SYNC_STATUS_API_OFFLINE
+    sensor._attr_native_value = 88.0
+    sensor._last_live_at = time.monotonic() - SENSOR_API_OFFLINE_GRACE_S - 5
+    assert sensor.native_value == 0
+
+
+def test_native_value_zero_api_offline_no_reading_ever(sensor, coordinator):
+    """With no reading ever received, api_offline immediately returns 0."""
+    coordinator._api_reachable = False
+    assert coordinator.sync_status == SYNC_STATUS_API_OFFLINE
+    sensor._attr_native_value = None
+    sensor._last_live_at = 0.0
+    assert sensor.native_value == 0
+
+
+# ---------- coordinator debounce fixes ----------
+
+def test_car_off_timer_not_started_before_ever_live(coordinator):
+    """Debounce timer stays None at startup (never seen live) — no false 'live' window."""
+    coordinator._api_reachable = True
+    coordinator._health_data = {"can_connected": False, "last_reading_ms": 0}
+    coordinator._update_car_off_debounce()
+    # _was_ever_live is False → timer should NOT start
+    assert coordinator._car_off_since_mono is None
+
+
+def test_car_off_timer_cleared_on_api_failure(coordinator):
+    """Debounce timer is cleared when API goes offline to avoid stale accumulation."""
+    coordinator._car_off_since_mono = time.monotonic() - 10
+    coordinator._api_reachable = True
+    # Simulate crossing HEALTH_FAIL_THRESHOLD
+    coordinator._consecutive_health_failures = 99
+    coordinator._api_reachable = False
+    coordinator._health_data = {}
+    coordinator._car_off_since_mono = None  # as done in _poll_health failure branch
+    assert coordinator._car_off_since_mono is None
+
+
+def test_was_ever_live_set_on_first_live_poll(coordinator):
+    """_was_ever_live flips to True once health confirms a live reading."""
+    coordinator._api_reachable = True
+    now_ms = int(time.time() * 1000)
+    coordinator._health_data = {"can_connected": True, "last_reading_ms": now_ms - 1000}
+    assert not coordinator._was_ever_live
+    coordinator._update_car_off_debounce()
+    assert coordinator._was_ever_live
+    assert coordinator._car_off_since_mono is None

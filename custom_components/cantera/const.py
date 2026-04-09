@@ -51,6 +51,9 @@ SYNC_STALE_THRESHOLD_S = 30  # seconds before a reading timestamp is considered 
 # This prevents rapid oscillation when the ECU briefly stops responding between
 # successful OBD poll cycles (e.g. during ECU keep-alive retries).
 SYNC_CAR_OFF_DEBOUNCE_S = 30
+# How long to show last-known values during an API outage before zeroing sensors.
+# A brief Pi reboot (~30-60 s) should not cause cards to blank out.
+SENSOR_API_OFFLINE_GRACE_S = 60
 
 # Unit -> HA device_class mapping
 UNIT_DEVICE_CLASS_MAP = {
