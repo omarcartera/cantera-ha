@@ -7,6 +7,11 @@ def test_binary_sensor_platform_not_registered():
     assert "binary_sensor" not in PLATFORMS
 
 
-def test_only_sensor_platform_registered():
-    """Only the sensor platform should be registered."""
-    assert PLATFORMS == ["sensor"]
+def test_sensor_platform_registered():
+    """The sensor platform must be in PLATFORMS."""
+    assert "sensor" in PLATFORMS
+
+
+def test_update_platform_registered():
+    """The update platform must be in PLATFORMS."""
+    assert "update" in PLATFORMS

@@ -2,8 +2,8 @@
   "domain": "cantera",
   "name": "CANtera OBD-II",
   "version": "0.1.0",
-  "documentation": "https://github.com/cantera-project/cantera-ha",
-  "issue_tracker": "https://github.com/cantera-project/cantera-ha/issues",
+  "documentation": "https://github.com/omarcartera/cantera-ha",
+  "issue_tracker": "https://github.com/omarcartera/cantera-ha/issues",
   "codeowners": [
     "@cantera-project"
   ],
