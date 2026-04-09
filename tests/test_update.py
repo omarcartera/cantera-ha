@@ -452,6 +452,96 @@ async def test_download_and_install_rejects_zip_slip(entity, tmp_path):
         await entity._download_and_install("http://example.com/fake.zip", tmp_path)
 
 
+async def test_download_and_install_atomic_swap(entity, tmp_path):
+    """Successful install replaces install_dir atomically via staging+rename.
+
+    After a successful install:
+    - install_dir contains the new files
+    - staging dir is removed
+    - backup dir is removed
+    """
+    import io
+    import zipfile as _zipfile
+
+    install_dir = tmp_path / "cantera"
+    install_dir.mkdir()
+    (install_dir / "old_file.py").write_text("old content")
+
+    # Build a valid archive: repo-abc1234/custom_components/cantera/manifest.json
+    buf = io.BytesIO()
+    with _zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("repo-abc1234/custom_components/cantera/manifest.json", '{"version":"9.9.9"}')
+        zf.writestr("repo-abc1234/custom_components/cantera/sensor.py", "# new sensor")
+    buf.seek(0)
+    zip_bytes = buf.read()
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.read = AsyncMock(return_value=zip_bytes)
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+    mock_session = MagicMock()
+    mock_session.get.return_value = mock_resp
+
+    with patch(
+        "custom_components.cantera.update.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        await entity._download_and_install("http://example.com/fake.zip", install_dir)
+
+    # New files present; old file gone (replaced by the new directory).
+    assert (install_dir / "manifest.json").read_text() == '{"version":"9.9.9"}'
+    assert (install_dir / "sensor.py").exists()
+    assert not (install_dir / "old_file.py").exists()
+
+    # Staging and backup directories cleaned up.
+    staging = install_dir.parent / "cantera.install_staging"
+    backup = install_dir.parent / "cantera.install_backup"
+    assert not staging.exists()
+    assert not backup.exists()
+
+
+async def test_download_and_install_leaves_original_on_extract_failure(entity, tmp_path):
+    """If extraction fails before the rename swap, the original install_dir is untouched."""
+    import io
+    import zipfile as _zipfile
+
+    install_dir = tmp_path / "cantera"
+    install_dir.mkdir()
+    (install_dir / "original.py").write_text("original")
+
+    # Archive with no cantera/ subdir — FileNotFoundError raised before the swap.
+    buf = io.BytesIO()
+    with _zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("some_other_dir/file.txt", "no cantera here")
+    buf.seek(0)
+    zip_bytes = buf.read()
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.read = AsyncMock(return_value=zip_bytes)
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+    mock_session = MagicMock()
+    mock_session.get.return_value = mock_resp
+
+    with (
+        patch(
+            "custom_components.cantera.update.async_get_clientsession",
+            return_value=mock_session,
+        ),
+        pytest.raises(FileNotFoundError),
+    ):
+        await entity._download_and_install("http://example.com/fake.zip", install_dir)
+
+    # Original install_dir completely untouched.
+    assert (install_dir / "original.py").read_text() == "original"
+
+
 # ---------------------------------------------------------------------------
 # async_setup_entry smoke test
 # ---------------------------------------------------------------------------

@@ -318,7 +318,22 @@ class CanteraUpdateEntity(UpdateEntity):
     async def _download_and_install(
         self, zipball_url: str, install_dir: Path
     ) -> None:
-        """Download the release zipball and overwrite the integration directory."""
+        """Download the release zipball and atomically replace the integration directory.
+
+        The install is two-phase:
+
+        1. Download → extract → copy into a *staging* directory that lives
+           alongside the real install directory (same filesystem → rename is
+           instant and atomic on Linux/macOS).
+        2. Rename current install dir to ``<name>.bak``, rename staging to the
+           real name, then delete the backup.
+
+        If anything fails before step 2, the live integration is untouched.
+        If anything fails after step 2, the backup remains for manual recovery.
+        """
+        staging = install_dir.parent / f"{install_dir.name}.install_staging"
+        backup = install_dir.parent / f"{install_dir.name}.install_backup"
+
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             zip_path = tmp_path / "release.zip"
@@ -360,8 +375,33 @@ class CanteraUpdateEntity(UpdateEntity):
                     "Cannot locate custom_components/cantera/ inside the release archive"
                 )
 
+            # Phase 1: copy into staging (any failure here leaves live dir intact).
+            if staging.exists():
+                await asyncio.get_running_loop().run_in_executor(
+                    None, shutil.rmtree, staging
+                )
             await asyncio.get_running_loop().run_in_executor(
-                None, _copy_tree, src, install_dir
+                None, _copy_tree, src, staging
+            )
+
+        # Phase 2: atomic swap (rename within same parent directory).
+        # Both renames are near-instantaneous; the window where neither copy
+        # exists is essentially zero on Linux.
+        if backup.exists():
+            await asyncio.get_running_loop().run_in_executor(
+                None, shutil.rmtree, backup
+            )
+        if install_dir.exists():
+            install_dir.rename(backup)
+        staging.rename(install_dir)
+        # Remove backup asynchronously — failure here is non-fatal.
+        try:
+            await asyncio.get_running_loop().run_in_executor(
+                None, shutil.rmtree, backup
+            )
+        except Exception:
+            _LOGGER.warning(
+                "Could not remove install backup at %s — safe to delete manually", backup
             )
 
 
