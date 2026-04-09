@@ -124,14 +124,18 @@ class CanteraSensor(RestoreSensor):
         dc_str = UNIT_DEVICE_CLASS_MAP.get(unit) if unit else None
         self._attr_device_class = _DEVICE_CLASS_LOOKUP.get(dc_str) if dc_str else None
 
-        sc_str = UNIT_STATE_CLASS_MAP.get(unit, "measurement") if unit else "measurement"
-        self._attr_state_class = (
-            _STATE_CLASS_LOOKUP.get(sc_str, SensorStateClass.MEASUREMENT)
-            if sc_str
-            else SensorStateClass.MEASUREMENT
-        )
-
-        self._attr_suggested_display_precision = UNIT_PRECISION_MAP.get(unit) if unit else None
+        if is_diagnostic:
+            # Mode 09 sensors are text/string values — no state class or precision.
+            self._attr_state_class = None
+            self._attr_suggested_display_precision = None
+        else:
+            sc_str = UNIT_STATE_CLASS_MAP.get(unit, "measurement") if unit else "measurement"
+            self._attr_state_class = (
+                _STATE_CLASS_LOOKUP.get(sc_str, SensorStateClass.MEASUREMENT)
+                if sc_str
+                else SensorStateClass.MEASUREMENT
+            )
+            self._attr_suggested_display_precision = UNIT_PRECISION_MAP.get(unit) if unit else None
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"cantera_vehicle_{entry_id}")},
@@ -190,9 +194,11 @@ class CanteraSensor(RestoreSensor):
           Diagnostic sensors always persist — they never need the grace window.
         """
         if self._is_diagnostic:
-            # Static vehicle metadata — always return the last-known value
-            # regardless of connection or car state.
-            return self._attr_native_value
+            # Static vehicle metadata — always return the last-known value as a
+            # string regardless of connection or car state.  Mode 09 values (VIN,
+            # ECU name, CVN, IUPR…) are always presented as text in HA.
+            v = self._attr_native_value
+            return str(v) if v is not None else None
 
         status = self._coordinator.sync_status
         if status == SYNC_STATUS_CAR_OFF:
