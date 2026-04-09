@@ -15,7 +15,6 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    DEVICE_IDENTIFIER,
     DEVICE_MANUFACTURER,
     DEVICE_MODEL,
     DOMAIN,
@@ -64,10 +63,10 @@ async def async_setup_entry(
     coordinator: CanteraCoordinator = entry.runtime_data
 
     pid_sensors = [
-        CanteraSensor(coordinator, name, unit)
+        CanteraSensor(coordinator, name, unit, entry)
         for name, unit in (MODE01_PIDS + MODE09_PIDS)
     ]
-    async_add_entities([CanteraSyncStatusSensor(coordinator), *pid_sensors])
+    async_add_entities([CanteraSyncStatusSensor(coordinator, entry), *pid_sensors])
 
 
 class CanteraSensor(RestoreSensor):
@@ -78,18 +77,22 @@ class CanteraSensor(RestoreSensor):
     matching PID name arrives, or restored from HA storage on restart.
     """
 
+    _attr_has_entity_name = True
+
     def __init__(
         self,
         coordinator: CanteraCoordinator,
         name: str,
         unit: str | None = None,
+        entry: ConfigEntry | None = None,
     ) -> None:
         """Initialise sensor for the given PID name and unit."""
         super().__init__()
         self._coordinator = coordinator
         slug = name.lower().replace(" ", "_")
 
-        self._attr_unique_id = f"{DOMAIN}_{slug}"
+        entry_id = entry.entry_id if entry is not None else "default"
+        self._attr_unique_id = f"{DOMAIN}_{entry_id}_{slug}"
         self._attr_name = name
         self._attr_native_unit_of_measurement = unit
         self._attr_native_value = None
@@ -107,13 +110,14 @@ class CanteraSensor(RestoreSensor):
         self._attr_suggested_display_precision = UNIT_PRECISION_MAP.get(unit) if unit else None
 
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, DEVICE_IDENTIFIER)},
+            identifiers={(DOMAIN, f"cantera_vehicle_{entry_id}")},
             name="CANtera Vehicle",
             manufacturer=DEVICE_MANUFACTURER,
             model=DEVICE_MODEL,
         )
 
         self._slug = slug
+        self._restored = False
 
     async def async_added_to_hass(self) -> None:
         """Register callbacks and restore state when added to HA."""
@@ -126,6 +130,7 @@ class CanteraSensor(RestoreSensor):
                 self._attr_native_unit_of_measurement = (
                     last_data.native_unit_of_measurement
                 )
+            self._restored = True
 
     async def async_will_remove_from_hass(self) -> None:
         """Unregister callbacks when entity is removed from HA."""
@@ -134,12 +139,15 @@ class CanteraSensor(RestoreSensor):
 
     @property
     def available(self) -> bool:
-        """Sensor is available only while live data is flowing.
+        """Sensor is available while live data flows, or while holding restored state.
 
-        When the car is off or the RPi is unreachable the sensor shows as
-        Unavailable (grayed out) in HA rather than displaying the stale
-        value from the previous session.
+        If state was restored from HA storage and a live reading has not yet
+        arrived, the restored value is shown as available so the user sees data
+        immediately after restart.  Once a live reading clears the flag the
+        normal coordinator-based check takes over.
         """
+        if self._restored and self._attr_native_value is not None:
+            return True
         return self._coordinator.sync_status == SYNC_STATUS_LIVE
 
     @property
@@ -152,6 +160,7 @@ class CanteraSensor(RestoreSensor):
         """Update value when a matching reading arrives."""
         pid_slug = reading.get("pid", "").lower().replace(" ", "_")
         if pid_slug == self._slug:
+            self._restored = False
             self._attr_native_value = reading.get("value")
             self.async_write_ha_state()
 
@@ -187,12 +196,13 @@ class CanteraSyncStatusSensor(SensorEntity):
     _attr_name = "Data Sync Status"
     _attr_should_poll = False
 
-    def __init__(self, coordinator: CanteraCoordinator) -> None:
+    def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry | None = None) -> None:
         """Initialise from coordinator."""
         self._coordinator = coordinator
-        self._attr_unique_id = f"{DOMAIN}_sync_status"
+        entry_id = entry.entry_id if entry is not None else "default"
+        self._attr_unique_id = f"{DOMAIN}_{entry_id}_sync_status"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, DEVICE_IDENTIFIER)},
+            identifiers={(DOMAIN, f"cantera_vehicle_{entry_id}")},
             name="CANtera Vehicle",
             manufacturer=DEVICE_MANUFACTURER,
             model=DEVICE_MODEL,

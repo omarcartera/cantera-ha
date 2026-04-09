@@ -7,7 +7,6 @@ import pytest
 from custom_components.cantera.const import (
     CONF_HOST,
     CONF_PORT,
-    DEVICE_IDENTIFIER,
     DEVICE_MANUFACTURER,
     DEVICE_MODEL,
     DOMAIN,
@@ -42,9 +41,9 @@ def coordinator(hass, mock_entry):
 
 
 @pytest.fixture
-def sensor(coordinator):
+def sensor(coordinator, mock_entry):
     """Pre-created sensor for Engine RPM (new constructor signature)."""
-    s = CanteraSensor(coordinator, "Engine RPM", "rpm")
+    s = CanteraSensor(coordinator, "Engine RPM", "rpm", mock_entry)
     s.async_write_ha_state = MagicMock()
     return s
 
@@ -52,7 +51,7 @@ def sensor(coordinator):
 # ---------- CanteraSensor unit tests ----------
 
 def test_sensor_unique_id(sensor):
-    assert sensor._attr_unique_id == "cantera_engine_rpm"
+    assert sensor._attr_unique_id == "cantera_test_entry_id_engine_rpm"
 
 
 def test_sensor_name(sensor):
@@ -108,7 +107,7 @@ def test_sensor_precision_all_mapped_units(coordinator):
 
 def test_sensor_device_info(sensor):
     info = sensor._attr_device_info
-    assert (DOMAIN, DEVICE_IDENTIFIER) in info["identifiers"]
+    assert (DOMAIN, "cantera_vehicle_test_entry_id") in info["identifiers"]
     assert info["manufacturer"] == DEVICE_MANUFACTURER
     assert info["model"] == DEVICE_MODEL
 
@@ -216,14 +215,14 @@ async def test_async_setup_entry_includes_mode09_pids(hass, mock_entry, coordina
 # ---------- CanteraSyncStatusSensor unit tests ----------
 
 @pytest.fixture
-def sync_sensor(coordinator):
-    s = CanteraSyncStatusSensor(coordinator)
+def sync_sensor(coordinator, mock_entry):
+    s = CanteraSyncStatusSensor(coordinator, mock_entry)
     s.async_write_ha_state = MagicMock()
     return s
 
 
 def test_sync_sensor_unique_id(sync_sensor):
-    assert sync_sensor._attr_unique_id == "cantera_sync_status"
+    assert sync_sensor._attr_unique_id == "cantera_test_entry_id_sync_status"
 
 
 def test_sync_sensor_name(sync_sensor):
