@@ -497,3 +497,57 @@ def test_was_ever_live_set_on_first_live_poll(coordinator):
     coordinator._update_car_off_debounce()
     assert coordinator._was_ever_live
     assert coordinator._car_off_since_mono is None
+
+
+# ---------- Mode 09 diagnostic sensor persistence ----------
+
+def test_mode09_sensor_persists_value_when_car_off(coordinator):
+    """Mode 09 sensors (VIN, calibration IDs) must not return 0 when car is off.
+
+    These are static vehicle identifiers — zeroing them is always wrong.
+    """
+    sensor = CanteraSensor(coordinator, "VIN", None, is_diagnostic=True)
+    sensor._attr_native_value = "ZFA0000001234567"
+    coordinator._api_reachable = True
+    coordinator._car_off_since_mono = time.monotonic() - SYNC_CAR_OFF_DEBOUNCE_S - 1
+    assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
+    assert sensor.native_value == "ZFA0000001234567"
+
+
+def test_mode09_sensor_persists_value_when_api_offline(coordinator):
+    """Mode 09 sensors persist their value when the API is offline — no grace window needed."""
+    sensor = CanteraSensor(coordinator, "Calibration ID #1", None, is_diagnostic=True)
+    sensor._attr_native_value = "CAL-REV-42"
+    coordinator._api_reachable = False
+    assert coordinator.sync_status == SYNC_STATUS_API_OFFLINE
+    # Even with no reading ever received (_last_live_at == 0), value persists.
+    sensor._last_live_at = 0.0
+    assert sensor.native_value == "CAL-REV-42"
+
+
+def test_mode09_sensor_persists_none_before_first_reading(coordinator):
+    """Mode 09 sensor returns None (not 0) when no reading has ever arrived."""
+    sensor = CanteraSensor(coordinator, "ECU Name", None, is_diagnostic=True)
+    # No reading received yet — _attr_native_value starts None.
+    coordinator._api_reachable = True
+    coordinator._car_off_since_mono = time.monotonic() - SYNC_CAR_OFF_DEBOUNCE_S - 1
+    assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
+    assert sensor.native_value is None
+
+
+def test_mode01_sensor_returns_zero_when_car_off(coordinator):
+    """Mode 01 live sensors (RPM, speed, etc.) still return 0 on car_off."""
+    sensor = CanteraSensor(coordinator, "Engine RPM", "rpm", is_diagnostic=False)
+    sensor._attr_native_value = 850.0
+    coordinator._api_reachable = True
+    coordinator._car_off_since_mono = time.monotonic() - SYNC_CAR_OFF_DEBOUNCE_S - 1
+    assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
+    assert sensor.native_value == 0
+
+
+def test_mode09_is_diagnostic_flag_set(coordinator):
+    """CanteraSensor stores _is_diagnostic correctly."""
+    diag = CanteraSensor(coordinator, "VIN", None, is_diagnostic=True)
+    live = CanteraSensor(coordinator, "Engine RPM", "rpm", is_diagnostic=False)
+    assert diag._is_diagnostic is True
+    assert live._is_diagnostic is False

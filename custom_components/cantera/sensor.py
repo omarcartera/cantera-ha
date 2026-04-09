@@ -117,6 +117,7 @@ class CanteraSensor(RestoreSensor):
         self._attr_native_unit_of_measurement = unit
         self._attr_native_value = None
 
+        self._is_diagnostic = is_diagnostic
         if is_diagnostic:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -180,10 +181,19 @@ class CanteraSensor(RestoreSensor):
         """Return sensor reading, or a graceful fallback when data is absent.
 
         - ``live`` / ``syncing``: last SSE reading (or None before first read).
-        - ``car_off``: 0 — car is parked, all measurements are effectively 0.
+        - ``car_off``: Mode 01 live sensors return 0 (car is parked, all
+          measurements are effectively 0). Mode 09 diagnostic sensors (VIN,
+          calibration IDs, ECU names) persist their last-known value — they
+          are static vehicle identifiers that should never be zeroed.
         - ``api_offline``: last-known value for up to SENSOR_API_OFFLINE_GRACE_S,
           then 0.  This masks brief Pi reboots without permanently freezing values.
+          Diagnostic sensors always persist — they never need the grace window.
         """
+        if self._is_diagnostic:
+            # Static vehicle metadata — always return the last-known value
+            # regardless of connection or car state.
+            return self._attr_native_value
+
         status = self._coordinator.sync_status
         if status == SYNC_STATUS_CAR_OFF:
             return 0
