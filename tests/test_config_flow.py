@@ -124,34 +124,33 @@ def _make_session_mock(status: int, json_return=None):
     mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
     mock_resp.__aexit__ = AsyncMock(return_value=False)
 
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
     mock_session.get = MagicMock(return_value=mock_resp)
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=False)
     return mock_session
 
 
-async def test_get_device_info_returns_json_on_200():
+async def test_get_device_info_returns_json_on_200(hass):
     """_get_device_info returns parsed JSON when status is 200."""
     mock_session = _make_session_mock(200, json_return={"id": "device-xyz", "name": "CANtera"})
-    with patch("aiohttp.ClientSession", return_value=mock_session):
-        result = await _get_device_info("192.168.1.100", 8088)
+    with patch("custom_components.cantera.config_flow.async_get_clientsession", return_value=mock_session):
+        result = await _get_device_info("192.168.1.100", 8088, hass)
     assert result == {"id": "device-xyz", "name": "CANtera"}
 
 
-async def test_get_device_info_non_200_returns_none():
+async def test_get_device_info_non_200_returns_none(hass):
     """_get_device_info returns None when the server returns a non-200 status."""
     mock_session = _make_session_mock(404)
-    with patch("aiohttp.ClientSession", return_value=mock_session):
-        result = await _get_device_info("192.168.1.100", 8088)
+    with patch("custom_components.cantera.config_flow.async_get_clientsession", return_value=mock_session):
+        result = await _get_device_info("192.168.1.100", 8088, hass)
     assert result is None
 
 
-async def test_get_device_info_exception_returns_none():
+async def test_get_device_info_exception_returns_none(hass):
     """_get_device_info swallows exceptions and returns None."""
-    with patch("aiohttp.ClientSession") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(side_effect=Exception("network error"))
-        result = await _get_device_info("192.168.1.100", 8088)
+    mock_session = MagicMock()
+    mock_session.get = MagicMock(side_effect=Exception("network error"))
+    with patch("custom_components.cantera.config_flow.async_get_clientsession", return_value=mock_session):
+        result = await _get_device_info("192.168.1.100", 8088, hass)
     assert result is None
 
 

@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import aiohttp
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 
@@ -191,9 +192,8 @@ class CanteraCoordinator:
         """Poll /api/health and update reachability state."""
         url = f"{self._base_url}{HEALTH_ENDPOINT}"
         try:
-            async with aiohttp.ClientSession() as session, session.get(
-                url, timeout=aiohttp.ClientTimeout(total=3)
-            ) as resp:
+            session = async_get_clientsession(self._hass)
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
                 if resp.status == 200:
                     self._health_data = await resp.json()
                     self._consecutive_health_failures = 0
@@ -296,7 +296,8 @@ class CanteraCoordinator:
                 f"{self._base_url}{HISTORY_ENDPOINT}"
                 f"?start={last_sync_ms}&end={now_ms}"
             )
-            async with aiohttp.ClientSession() as session, session.get(
+            session = async_get_clientsession(self._hass)
+            async with session.get(
                 history_url, timeout=aiohttp.ClientTimeout(total=30)
             ) as resp:
                 if resp.status != 200:

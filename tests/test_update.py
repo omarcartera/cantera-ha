@@ -44,7 +44,7 @@ def entity(hass):
 
 
 def _make_session_mock(status: int = 200, json_return=None, raise_exc=None):
-    """Build an aiohttp.ClientSession mock."""
+    """Build an aiohttp session mock for async_get_clientsession."""
     mock_resp = AsyncMock()
     mock_resp.status = status
     if json_return is not None:
@@ -56,13 +56,10 @@ def _make_session_mock(status: int = 200, json_return=None, raise_exc=None):
     mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
     mock_resp.__aexit__ = AsyncMock(return_value=False)
 
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
     mock_session.get = MagicMock(return_value=mock_resp)
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=False)
 
-    mock_cls = MagicMock(return_value=mock_session)
-    return mock_cls, mock_session, mock_resp
+    return mock_session, mock_resp
 
 
 # ---------------------------------------------------------------------------
@@ -124,8 +121,8 @@ def test_should_poll_true(entity):
 
 async def test_async_update_sets_latest_version(entity):
     """async_update populates latest_version from the first release in the list."""
-    mock_cls, _, _ = _make_session_mock(200, json_return=FAKE_RELEASES)
-    with patch("custom_components.cantera.update.aiohttp.ClientSession", mock_cls):
+    mock_session, _ = _make_session_mock(200, json_return=FAKE_RELEASES)
+    with patch("custom_components.cantera.update.async_get_clientsession", return_value=mock_session):
         await entity.async_update()
 
     assert entity.latest_version == "0.3.0"
@@ -134,8 +131,8 @@ async def test_async_update_sets_latest_version(entity):
 
 async def test_async_update_sets_release_notes(entity):
     """async_update caches the release body for async_release_notes."""
-    mock_cls, _, _ = _make_session_mock(200, json_return=FAKE_RELEASES)
-    with patch("custom_components.cantera.update.aiohttp.ClientSession", mock_cls):
+    mock_session, _ = _make_session_mock(200, json_return=FAKE_RELEASES)
+    with patch("custom_components.cantera.update.async_get_clientsession", return_value=mock_session):
         await entity.async_update()
 
     notes = await entity.async_release_notes()
@@ -145,33 +142,33 @@ async def test_async_update_sets_release_notes(entity):
 async def test_async_update_strips_v_prefix(entity):
     """Tag names like 'v0.3.0' are normalised to '0.3.0'."""
     releases = [{"tag_name": "v1.0.0", "html_url": "", "zipball_url": "", "body": ""}]
-    mock_cls, _, _ = _make_session_mock(200, json_return=releases)
-    with patch("custom_components.cantera.update.aiohttp.ClientSession", mock_cls):
+    mock_session, _ = _make_session_mock(200, json_return=releases)
+    with patch("custom_components.cantera.update.async_get_clientsession", return_value=mock_session):
         await entity.async_update()
     assert entity.latest_version == "1.0.0"
 
 
 async def test_async_update_non_200_does_not_change_state(entity):
     """A non-200 response leaves latest_version unchanged."""
-    mock_cls, _, _ = _make_session_mock(403)
-    with patch("custom_components.cantera.update.aiohttp.ClientSession", mock_cls):
+    mock_session, _ = _make_session_mock(403)
+    with patch("custom_components.cantera.update.async_get_clientsession", return_value=mock_session):
         await entity.async_update()
     assert entity.latest_version is None
 
 
 async def test_async_update_network_error_does_not_raise(entity):
     """Network exception during polling is swallowed — never propagates."""
-    mock_cls, mock_session, _ = _make_session_mock()
+    mock_session, _ = _make_session_mock()
     mock_session.get = MagicMock(side_effect=Exception("network down"))
-    with patch("custom_components.cantera.update.aiohttp.ClientSession", mock_cls):
+    with patch("custom_components.cantera.update.async_get_clientsession", return_value=mock_session):
         await entity.async_update()  # must not raise
     assert entity.latest_version is None
 
 
 async def test_async_update_empty_releases_list(entity):
     """Empty releases list leaves state unchanged."""
-    mock_cls, _, _ = _make_session_mock(200, json_return=[])
-    with patch("custom_components.cantera.update.aiohttp.ClientSession", mock_cls):
+    mock_session, _ = _make_session_mock(200, json_return=[])
+    with patch("custom_components.cantera.update.async_get_clientsession", return_value=mock_session):
         await entity.async_update()
     assert entity.latest_version is None
 

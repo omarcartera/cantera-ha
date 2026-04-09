@@ -7,6 +7,7 @@ import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_HOST,
@@ -34,7 +35,7 @@ class ConnectionResult(Enum):
     CANNOT_CONNECT = "cannot_connect"
 
 
-async def _test_connection(host: str, port: int) -> ConnectionResult:
+async def _test_connection(host: str, port: int, hass) -> ConnectionResult:
     """Test connectivity by hitting /api/health (lightweight, immediate response).
 
     Uses the health endpoint instead of the SSE stream so the test
@@ -42,7 +43,8 @@ async def _test_connection(host: str, port: int) -> ConnectionResult:
     """
     url = f"http://{host}:{port}{HEALTH_ENDPOINT}"
     try:
-        async with aiohttp.ClientSession() as session, session.get(
+        session = async_get_clientsession(hass)
+        async with session.get(
             url, timeout=aiohttp.ClientTimeout(connect=5, total=5)
         ) as resp:
             if resp.status == 200:
@@ -63,11 +65,12 @@ async def _test_connection(host: str, port: int) -> ConnectionResult:
         return ConnectionResult.CANNOT_CONNECT
 
 
-async def _get_device_info(host: str, port: int) -> dict | None:
+async def _get_device_info(host: str, port: int, hass) -> dict | None:
     """Fetch /api/device for stable identity. Returns None if not available."""
     url = f"http://{host}:{port}{DEVICE_ENDPOINT}"
     try:
-        async with aiohttp.ClientSession() as session, session.get(
+        session = async_get_clientsession(hass)
+        async with session.get(
             url, timeout=aiohttp.ClientTimeout(connect=5, total=5)
         ) as resp:
             if resp.status == 200:
@@ -91,9 +94,9 @@ class CanteraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             port = user_input[CONF_PORT]
             user_input = {**user_input, CONF_HOST: host}
 
-            result = await _test_connection(host, port)
+            result = await _test_connection(host, port, self.hass)
             if result == ConnectionResult.OK:
-                device_info = await _get_device_info(host, port)
+                device_info = await _get_device_info(host, port, self.hass)
                 unique_id = (
                     device_info.get("id")
                     if device_info and device_info.get("id")

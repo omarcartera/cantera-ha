@@ -27,6 +27,7 @@ import aiohttp
 from homeassistant.components.update import UpdateEntity, UpdateEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -143,7 +144,8 @@ class CanteraUpdateEntity(UpdateEntity):
         last known state rather than becoming unavailable.
         """
         try:
-            async with aiohttp.ClientSession() as session, session.get(
+            session = async_get_clientsession(self._hass)
+            async with session.get(
                 GITHUB_RELEASES_URL,
                 headers=GITHUB_API_HEADERS,
                 timeout=aiohttp.ClientTimeout(total=15),
@@ -251,7 +253,8 @@ class CanteraUpdateEntity(UpdateEntity):
             zip_path = tmp_path / "release.zip"
 
             # Download with redirect support (GitHub redirects to S3).
-            async with aiohttp.ClientSession() as session, session.get(
+            session = async_get_clientsession(self._hass)
+            async with session.get(
                 zipball_url,
                 headers=GITHUB_API_HEADERS,
                 timeout=aiohttp.ClientTimeout(total=120),
