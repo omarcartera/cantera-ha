@@ -18,5 +18,17 @@
     "abort": {
       "already_configured": "CANtera device is already configured."
     }
+  },
+  "entity": {
+    "sensor": {
+      "sync_status": {
+        "state": {
+          "live": "Live",
+          "car_off": "Car off",
+          "syncing": "Syncing",
+          "api_offline": "API offline"
+        }
+      }
+    }
   }
 }

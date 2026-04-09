@@ -12,6 +12,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -64,7 +65,10 @@ async def async_setup_entry(
 
     pid_sensors = [
         CanteraSensor(coordinator, name, unit, entry)
-        for name, unit in (MODE01_PIDS + MODE09_PIDS)
+        for name, unit in MODE01_PIDS
+    ] + [
+        CanteraSensor(coordinator, name, unit, entry, is_diagnostic=True)
+        for name, unit in MODE09_PIDS
     ]
     async_add_entities([CanteraSyncStatusSensor(coordinator, entry), *pid_sensors])
 
@@ -85,6 +89,8 @@ class CanteraSensor(RestoreSensor):
         name: str,
         unit: str | None = None,
         entry: ConfigEntry | None = None,
+        *,
+        is_diagnostic: bool = False,
     ) -> None:
         """Initialise sensor for the given PID name and unit."""
         super().__init__()
@@ -96,6 +102,9 @@ class CanteraSensor(RestoreSensor):
         self._attr_name = name
         self._attr_native_unit_of_measurement = unit
         self._attr_native_value = None
+
+        if is_diagnostic:
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
         dc_str = UNIT_DEVICE_CLASS_MAP.get(unit) if unit else None
         self._attr_device_class = _DEVICE_CLASS_LOOKUP.get(dc_str) if dc_str else None
@@ -198,6 +207,9 @@ class CanteraSyncStatusSensor(SensorEntity):
     _attr_has_entity_name = True
     _attr_name = "Data Sync Status"
     _attr_should_poll = False
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = list(_SYNC_STATUS_ICON)
+    _attr_translation_key = "sync_status"
 
     def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry | None = None) -> None:
         """Initialise from coordinator."""
@@ -224,11 +236,6 @@ class CanteraSyncStatusSensor(SensorEntity):
     def native_value(self) -> str:
         """Return the current sync-status string."""
         return self._coordinator.sync_status
-
-    @property
-    def icon(self) -> str:
-        """Return an icon matching the current state."""
-        return _SYNC_STATUS_ICON.get(self._coordinator.sync_status, "mdi:help-circle")
 
     @callback
     def _handle_health_update(self, _health_data: dict) -> None:

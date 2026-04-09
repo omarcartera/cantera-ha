@@ -1,0 +1,14 @@
+{
+  "entity": {
+    "sensor": {
+      "sync_status": {
+        "state": {
+          "live": "mdi:check-circle",
+          "car_off": "mdi:car-off",
+          "syncing": "mdi:sync",
+          "api_offline": "mdi:wifi-off"
+        }
+      }
+    }
+  }
+}

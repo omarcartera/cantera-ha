@@ -118,6 +118,19 @@ def test_sensor_no_unit(coordinator):
     assert s._attr_native_unit_of_measurement is None
 
 
+def test_sensor_is_diagnostic_sets_entity_category(coordinator):
+    """Sensors created with is_diagnostic=True carry DIAGNOSTIC entity category."""
+    from homeassistant.helpers.entity import EntityCategory
+    s = CanteraSensor(coordinator, "VIN", None, is_diagnostic=True)
+    assert s._attr_entity_category == EntityCategory.DIAGNOSTIC
+
+
+def test_sensor_not_diagnostic_by_default(coordinator):
+    """Normal sensors have no entity category override."""
+    s = CanteraSensor(coordinator, "Engine RPM", "rpm")
+    assert getattr(s, "_attr_entity_category", None) is None
+
+
 def test_sensor_km_h_device_class(coordinator):
     """km/h maps to SensorDeviceClass.SPEED."""
     from homeassistant.components.sensor import SensorDeviceClass
@@ -227,6 +240,22 @@ def test_sync_sensor_unique_id(sync_sensor):
 
 def test_sync_sensor_name(sync_sensor):
     assert sync_sensor._attr_name == "Data Sync Status"
+
+
+def test_sync_sensor_device_class_is_enum(sync_sensor):
+    """CanteraSyncStatusSensor uses the ENUM device class for translation support."""
+    from homeassistant.components.sensor import SensorDeviceClass
+    assert sync_sensor._attr_device_class == SensorDeviceClass.ENUM
+
+
+def test_sync_sensor_options_cover_all_states(sync_sensor):
+    """_attr_options must include every possible sync-status value."""
+    from custom_components.cantera.sensor import _SYNC_STATUS_ICON
+    assert set(sync_sensor._attr_options) == set(_SYNC_STATUS_ICON)
+
+
+def test_sync_sensor_translation_key(sync_sensor):
+    assert sync_sensor._attr_translation_key == "sync_status"
 
 
 def test_sync_status_api_offline_by_default(sync_sensor, coordinator):
