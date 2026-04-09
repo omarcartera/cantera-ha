@@ -412,8 +412,12 @@ class CanteraCoordinator:
 
                 last_imported_ts = max(r["ts"] for r in readings)
                 await self._save_last_sync(last_imported_ts)
+        except (TimeoutError, asyncio.TimeoutError, aiohttp.ClientError) as exc:
+            # Pi offline or unreachable — expected during startup or when the car
+            # is off.  Log at DEBUG so HA logs stay clean.
+            _LOGGER.debug("History backfill skipped (Pi not reachable): %s", exc)
         except Exception:
-            _LOGGER.exception("History backfill failed")
+            _LOGGER.warning("History backfill failed unexpectedly", exc_info=True)
         finally:
             self._backfilling = False
             self._notify_health_listeners()
