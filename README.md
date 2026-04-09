@@ -1,7 +1,7 @@
 # 🚗 CANtera OBD-II — Home Assistant Integration
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
-[![HA Minimum Version](https://img.shields.io/badge/HA%20minimum-2023.6.0-blue.svg)](https://www.home-assistant.io)
+[![HA Minimum Version](https://img.shields.io/badge/HA%20minimum-2024.4.0-blue.svg)](https://www.home-assistant.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org)
 
@@ -18,6 +18,8 @@
 | 📊 **History backfill** | On reconnect, fetches missed readings from the Pi's Parquet logs and imports them into HA long-term statistics |
 | ❤️ **Health heartbeat** | Polls `/api/health` every 5 s — connection sensors go offline within 10 s of the Pi losing power |
 | 🔌 **CAN status sensor** | Dedicated binary sensor showing whether the OBD link to the vehicle ECU is active |
+| 🔁 **Reconfigure flow** | Update the Pi's IP or port from HA without removing and re-adding the integration |
+| 🩺 **Diagnostics** | Built-in diagnostics page in HA with connection state, health data, and config info |
 | 🚫 **Zero broker** | Connects directly to CANtera's built-in HTTP/SSE API — no MQTT, no Mosquitto |
 | 📦 **HACS compatible** | One-click install from the HACS custom repository list |
 
@@ -37,7 +39,7 @@
 |-----------|-------------|
 | **Raspberry Pi** | Running CANtera with an OBD-II CAN adapter attached |
 | **Network** | Pi reachable from the Home Assistant host (same LAN, or VPN with routing) |
-| **Home Assistant** | 2023.6.0 or later |
+| **Home Assistant** | 2024.4.0 or later |
 | **HACS** | For one-click installation (manual install also works) |
 
 > **⚠️ Tailscale note**: Tailscale IPs (`100.x.x.x`) are **not** accessible from
@@ -71,7 +73,7 @@ After=network.target
 ExecStart=/usr/local/bin/cantera -b 500000 log-obd --api
 Restart=always
 RestartSec=5s
-User=omar
+User=pi
 
 [Install]
 WantedBy=multi-user.target
@@ -115,6 +117,8 @@ Restart Home Assistant.
 2. Search for **CANtera**
 3. Enter the Pi's **local network IP** and port (default: `8088`)
 4. Click Submit — the integration tests `/api/health` and creates the config entry
+
+To update the host or port later, click **Configure** on the integration card and use the **Reconfigure** option — no need to remove and re-add the integration.
 
 ---
 
