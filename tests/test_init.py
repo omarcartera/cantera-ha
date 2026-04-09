@@ -126,3 +126,42 @@ async def test_async_remove_entry_exception_does_not_raise(hass, mock_entry):
         side_effect=RuntimeError("recorder not loaded"),
     ):
         await async_remove_entry(hass, mock_entry)  # must not raise
+
+
+async def test_services_registered_on_setup(hass, mock_entry):
+    """reconnect and request_history services are registered after setup."""
+    from unittest.mock import AsyncMock, patch
+
+    mock_coordinator = MagicMock()
+    mock_coordinator.start = MagicMock()
+    mock_coordinator.stop = AsyncMock()
+    mock_coordinator._backfill_task = None
+    mock_coordinator._backfill_history = AsyncMock()
+    hass.config_entries.async_forward_entry_setups = AsyncMock(return_value=True)
+    mock_entry.runtime_data = mock_coordinator
+
+    with patch("custom_components.cantera.CanteraCoordinator", return_value=mock_coordinator):
+        await async_setup_entry(hass, mock_entry)
+
+    assert hass.services.has_service(DOMAIN, "reconnect")
+    assert hass.services.has_service(DOMAIN, "request_history")
+
+
+async def test_services_not_double_registered(hass, mock_entry):
+    """Services are not registered twice if setup is called again."""
+    from unittest.mock import AsyncMock, patch
+
+    mock_coordinator = MagicMock()
+    mock_coordinator.start = MagicMock()
+    mock_coordinator.stop = AsyncMock()
+    mock_coordinator._backfill_task = None
+    mock_coordinator._backfill_history = AsyncMock()
+    hass.config_entries.async_forward_entry_setups = AsyncMock(return_value=True)
+    mock_entry.runtime_data = mock_coordinator
+
+    with patch("custom_components.cantera.CanteraCoordinator", return_value=mock_coordinator):
+        await async_setup_entry(hass, mock_entry)
+        # Calling again should not raise (services already registered)
+        await async_setup_entry(hass, mock_entry)
+
+    assert hass.services.has_service(DOMAIN, "reconnect")

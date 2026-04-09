@@ -411,3 +411,29 @@ async def test_sse_loop_reconnects_after_exception(coordinator):
 
     assert coordinator._connected is False
     assert iterations == 2
+
+
+async def test_poll_health_reentrant_guard_prevents_concurrent_calls(hass):
+    """_poll_health returns immediately if already running (no double-poll)."""
+    from unittest.mock import AsyncMock, patch
+
+    entry = MagicMock()
+    entry.data = {CONF_HOST: "10.0.0.1", CONF_PORT: 8080}
+    coordinator = CanteraCoordinator(hass, entry)
+
+    call_count = 0
+
+    async def slow_get(*_args, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("simulated slow failure")
+
+    # Manually mark as running before calling
+    coordinator._health_poll_running = True
+    with patch("custom_components.cantera.coordinator.async_get_clientsession"):
+        await coordinator._poll_health()
+
+    # Must return without touching the network
+    assert call_count == 0
+    # Guard must still be True (we set it, poll returned early without touching finally)
+    assert coordinator._health_poll_running is True
