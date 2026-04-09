@@ -141,11 +141,14 @@ class CanteraSensor(RestoreSensor):
     def available(self) -> bool:
         """Sensor is available while live data flows, or while holding restored state.
 
-        If state was restored from HA storage and a live reading has not yet
-        arrived, the restored value is shown as available so the user sees data
-        immediately after restart.  Once a live reading clears the flag the
-        normal coordinator-based check takes over.
+        During the startup grace period (before any health response arrives) the
+        sensor is optimistically shown as available.  If state was restored from
+        HA storage and a live reading has not yet arrived, the restored value is
+        also shown as available.  Once live data flows the normal coordinator
+        check takes over.
         """
+        if not self._coordinator._first_health_received:
+            return True
         if self._restored and self._attr_native_value is not None:
             return True
         return self._coordinator.sync_status == SYNC_STATUS_LIVE

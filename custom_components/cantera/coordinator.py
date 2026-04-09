@@ -65,6 +65,8 @@ class CanteraCoordinator:
         self._backfilling: bool = False
         # Task handle for the background backfill so we never double-start it.
         self._backfill_task: asyncio.Task | None = None
+        # Set True when the first successful /api/health response arrives.
+        self._first_health_received: bool = False
 
     # ------------------------------------------------------------------
     # Public API — SSE readings
@@ -199,6 +201,7 @@ class CanteraCoordinator:
                     self._consecutive_health_failures = 0
                     if not self._api_reachable:
                         self._api_reachable = True
+                    self._first_health_received = True
                     self._notify_health_listeners()
                     return
         except Exception:
