@@ -93,7 +93,7 @@ def test_unique_id(entity):
 
 def test_device_info_contains_domain(entity):
     info = entity.device_info
-    assert (DOMAIN, "cantera_vehicle") in info["identifiers"]
+    assert (DOMAIN, "cantera_vehicle_test_entry_id") in info["identifiers"]
 
 
 def test_installed_version_set_at_init(entity):
@@ -346,6 +346,37 @@ def test_copy_tree_handles_nested_directories(tmp_path):
     _copy_tree(src, dst)
 
     assert (dst / "sub" / "b.py").read_text() == "world"
+
+
+async def test_download_and_install_rejects_zip_slip(entity, tmp_path):
+    """Zip archives containing path-traversal entries raise ValueError."""
+    import io
+    import zipfile as _zipfile
+
+    # Build a zip with a path-traversal entry.
+    buf = io.BytesIO()
+    with _zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("../evil.txt", "pwned")
+    buf.seek(0)
+    zip_bytes = buf.read()
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.read = AsyncMock(return_value=zip_bytes)
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+    mock_session = MagicMock()
+    mock_session.get.return_value = mock_resp
+
+    with (
+        patch(
+            "custom_components.cantera.update.async_get_clientsession",
+            return_value=mock_session,
+        ),
+        pytest.raises(ValueError, match="Zip-slip"),
+    ):
+        await entity._download_and_install("http://example.com/fake.zip", tmp_path)
 
 
 # ---------------------------------------------------------------------------

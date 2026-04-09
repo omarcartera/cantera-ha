@@ -32,7 +32,6 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    DEVICE_IDENTIFIER,
     DEVICE_MANUFACTURER,
     DEVICE_MODEL,
     DOMAIN,
@@ -107,7 +106,7 @@ class CanteraUpdateEntity(UpdateEntity):
     @property
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
-            identifiers={(DOMAIN, DEVICE_IDENTIFIER)},
+            identifiers={(DOMAIN, f"cantera_vehicle_{self._entry_id}")},
             name="CANtera OBD-II",
             manufacturer=DEVICE_MANUFACTURER,
             model=DEVICE_MODEL,
@@ -264,7 +263,15 @@ class CanteraUpdateEntity(UpdateEntity):
                 zip_path.write_bytes(await resp.read())
 
             extracted = tmp_path / "extracted"
+            extracted.mkdir()
+            extraction_root = extracted.resolve()
             with zipfile.ZipFile(zip_path) as zf:
+                for member in zf.namelist():
+                    member_path = (extracted / member).resolve()
+                    if not str(member_path).startswith(str(extraction_root)):
+                        raise ValueError(
+                            f"Zip-slip detected: {member!r} would escape extraction dir"
+                        )
                 zf.extractall(extracted)
 
             # GitHub archives wrap everything in a top-level directory
@@ -281,7 +288,7 @@ class CanteraUpdateEntity(UpdateEntity):
                     "Cannot locate custom_components/cantera/ inside the release archive"
                 )
 
-            await asyncio.get_event_loop().run_in_executor(
+            await asyncio.get_running_loop().run_in_executor(
                 None, _copy_tree, src, install_dir
             )
 
