@@ -272,16 +272,16 @@ MODE01_PIDS: list[tuple[str, str | None]] = [
 ]
 
 MODE09_PIDS: list[tuple[str, str | None]] = [
-    ("Supported InfoType PIDs (00-1F)", None),
-    ("VIN - Message Count", None),
-    ("Vehicle Identification Number (VIN)", None),
-    ("Calibration ID Number - Message Count", None),
-    ("Calibration ID (CalID)", None),
-    ("CVN - Message Count", None),
-    ("Calibration Verification Number (CVN)", None),
-    ("In-Use Performance Tracking (IUPR) - Message Count", None),
-    ("IUPR Binary Data", None),
-    ("Engine Speed at Manufacturer's Declaration", "rpm"),
-    ("Exhaust Regulation or Type-Approval Date", None),
-    ("System Name or Engine Type", None),
+    ("Supported InfoType PIDs (00-1F)", None),         # 0x00
+    ("VIN - Message Count", None),                     # 0x01 (non-CAN only)
+    ("Vehicle Identification Number (VIN)", None),     # 0x02
+    ("Calibration ID Number - Message Count", None),   # 0x03 (non-CAN only)
+    ("Calibration ID (CalID)", None),                  # 0x04
+    ("CVN - Message Count", None),                     # 0x05 (non-CAN only)
+    ("Calibration Verification Number (CVN)", None),   # 0x06
+    ("IUPR Message Count", None),                      # 0x07 (non-CAN only)
+    ("In-use Performance Tracking (Spark Ignition)", None),         # 0x08
+    ("ECU Name Message Count", None),                  # 0x09
+    ("ECU Name", None),                                # 0x0A
+    ("In-use Performance Tracking (Compression Ignition)", None),   # 0x0B
 ]
