@@ -362,6 +362,7 @@ async def test_download_and_install_rejects_zip_slip(entity, tmp_path):
 
     mock_resp = AsyncMock()
     mock_resp.status = 200
+    mock_resp.raise_for_status = MagicMock()  # synchronous in aiohttp
     mock_resp.read = AsyncMock(return_value=zip_bytes)
     mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
     mock_resp.__aexit__ = AsyncMock(return_value=False)
