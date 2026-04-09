@@ -290,7 +290,8 @@ class CanteraUpdateEntity(UpdateEntity):
             await self._download_and_install(zipball_url, install_dir)
 
             # Update in-memory version so the entity reflects the change
-            # immediately, even before HA restarts.
+            # immediately. The config-entry reload below recreates all entities
+            # — no full HA restart is required or triggered.
             self._installed_version = target
             _LOGGER.info("CANtera integration version %s installed; reloading config entry", target)
             await self._hass.config_entries.async_reload(self._entry_id)
