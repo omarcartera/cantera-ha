@@ -158,7 +158,7 @@ def test_handle_reading_non_matching_pid(sensor):
 
 async def test_async_setup_entry_creates_all_pid_sensors(hass, mock_entry, coordinator):
     """async_setup_entry pre-creates sensors for all Mode 01 and Mode 09 PIDs."""
-    hass.data[DOMAIN] = {mock_entry.entry_id: coordinator}
+    mock_entry.runtime_data = coordinator
     added: list = []
     add_entities = MagicMock(side_effect=lambda entities: added.extend(entities))
     await async_setup_entry(hass, mock_entry, add_entities)
@@ -172,7 +172,7 @@ async def test_async_setup_entry_no_dynamic_listener(hass, mock_entry, coordinat
 
     Per-sensor reading listeners are registered in async_added_to_hass, not here.
     """
-    hass.data[DOMAIN] = {mock_entry.entry_id: coordinator}
+    mock_entry.runtime_data = coordinator
     listener_count_before = len(coordinator._listeners)
     await async_setup_entry(hass, mock_entry, MagicMock())
     assert len(coordinator._listeners) == listener_count_before
@@ -180,7 +180,7 @@ async def test_async_setup_entry_no_dynamic_listener(hass, mock_entry, coordinat
 
 async def test_async_setup_entry_pid_sensors_have_none_initial_value(hass, mock_entry, coordinator):
     """All pre-created PID sensors start with native_value None."""
-    hass.data[DOMAIN] = {mock_entry.entry_id: coordinator}
+    mock_entry.runtime_data = coordinator
     added: list = []
     add_entities = MagicMock(side_effect=lambda entities: added.extend(entities))
     await async_setup_entry(hass, mock_entry, add_entities)
@@ -191,7 +191,7 @@ async def test_async_setup_entry_pid_sensors_have_none_initial_value(hass, mock_
 
 async def test_async_setup_entry_includes_mode01_pids(hass, mock_entry, coordinator):
     """Every Mode 01 PID name appears in the pre-created sensor list."""
-    hass.data[DOMAIN] = {mock_entry.entry_id: coordinator}
+    mock_entry.runtime_data = coordinator
     added: list = []
     add_entities = MagicMock(side_effect=lambda entities: added.extend(entities))
     await async_setup_entry(hass, mock_entry, add_entities)
@@ -203,7 +203,7 @@ async def test_async_setup_entry_includes_mode01_pids(hass, mock_entry, coordina
 
 async def test_async_setup_entry_includes_mode09_pids(hass, mock_entry, coordinator):
     """Every Mode 09 PID name appears in the pre-created sensor list."""
-    hass.data[DOMAIN] = {mock_entry.entry_id: coordinator}
+    mock_entry.runtime_data = coordinator
     added: list = []
     add_entities = MagicMock(side_effect=lambda entities: added.extend(entities))
     await async_setup_entry(hass, mock_entry, add_entities)
@@ -290,7 +290,7 @@ def test_sync_sensor_health_update_triggers_write(sync_sensor):
 
 async def test_async_setup_entry_adds_sync_status_sensor(hass, mock_entry, coordinator):
     """async_setup_entry immediately registers CanteraSyncStatusSensor."""
-    hass.data[DOMAIN] = {mock_entry.entry_id: coordinator}
+    mock_entry.runtime_data = coordinator
     added: list = []
     add_entities = MagicMock(side_effect=lambda entities: added.extend(entities))
     await async_setup_entry(hass, mock_entry, add_entities)

@@ -61,7 +61,7 @@ async def async_setup_entry(
     Pre-creating every sensor means the user sees the full sensor list in HA
     right after installation, regardless of which PIDs the vehicle supports.
     """
-    coordinator: CanteraCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: CanteraCoordinator = entry.runtime_data
 
     pid_sensors = [
         CanteraSensor(coordinator, name, unit)
