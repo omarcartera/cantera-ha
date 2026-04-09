@@ -11,7 +11,7 @@ from .coordinator import CanteraCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor", "update"]
+PLATFORMS = ["sensor", "update", "firmware_update"]
 
 try:
     from homeassistant.components.recorder import get_instance

@@ -249,17 +249,17 @@ async def test_async_install_updates_installed_version(entity):
     assert entity.installed_version == "0.2.0"
 
 
-async def test_async_install_triggers_ha_restart(entity):
-    """After successful install, homeassistant.restart is called."""
+async def test_async_install_triggers_config_entry_reload(entity):
+    """After successful install, config_entries.async_reload is called (not homeassistant.restart)."""
     entity._releases = FAKE_RELEASES
 
     with (
         patch.object(entity, "_download_and_install", new_callable=AsyncMock),
-        patch.object(entity._hass.services, "async_call", new_callable=AsyncMock) as mock_call,
+        patch.object(entity._hass.config_entries, "async_reload", new_callable=AsyncMock) as mock_reload,
     ):
         await entity.async_install("0.3.0", False)
 
-    mock_call.assert_awaited_once_with("homeassistant", "restart")
+    mock_reload.assert_awaited_once_with(entity._entry_id)
 
 
 async def test_async_install_in_progress_set_and_cleared(entity):

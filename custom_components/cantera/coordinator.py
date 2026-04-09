@@ -13,12 +13,15 @@ from datetime import UTC, datetime, timedelta
 import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 
 from .const import (
     CONF_HOST,
     CONF_PORT,
+    DEVICE_MANUFACTURER,
+    DEVICE_MODEL,
     DOMAIN,
     HEALTH_ENDPOINT,
     HEALTH_FAIL_THRESHOLD,
@@ -48,6 +51,7 @@ class CanteraCoordinator:
     def __init__(self, hass: HomeAssistant, config_entry) -> None:
         """Initialise the coordinator."""
         self._hass = hass
+        self._entry_id: str = config_entry.entry_id
         self._host: str = config_entry.data[CONF_HOST]
         self._port: int = config_entry.data[CONF_PORT]
         self._base_url = f"http://{self._host}:{self._port}"
@@ -134,6 +138,21 @@ class CanteraCoordinator:
     def health_data(self) -> dict:
         """Last successful /api/health response (contains can_connected, etc.)."""
         return self._health_data
+
+    @property
+    def api_offline(self) -> bool:
+        """True when /api/health is unreachable."""
+        return not self._api_reachable
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Shared device info so all CANtera entities group under one device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"cantera_vehicle_{self._entry_id}")},
+            name="CANtera Vehicle",
+            manufacturer=DEVICE_MANUFACTURER,
+            model=DEVICE_MODEL,
+        )
 
     @property
     def sync_status(self) -> str:

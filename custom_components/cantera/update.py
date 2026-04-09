@@ -10,7 +10,7 @@ Installation flow
 1. Download the release zipball from GitHub.
 2. Overwrite the running ``custom_components/cantera/`` directory with the
    new files (skipping ``__pycache__``).
-3. Call ``homeassistant.restart`` so the new code is loaded cleanly.
+3. Reload the config entry so the new code is loaded without a full HA restart.
 """
 from __future__ import annotations
 
@@ -221,8 +221,8 @@ class CanteraUpdateEntity(UpdateEntity):
             # Update in-memory version so the entity reflects the change
             # immediately, even before HA restarts.
             self._installed_version = target
-            _LOGGER.info("CANtera integration version %s installed; restarting HA", target)
-            await self._hass.services.async_call("homeassistant", "restart")
+            _LOGGER.info("CANtera integration version %s installed; reloading config entry", target)
+            await self._hass.config_entries.async_reload(self._entry_id)
 
         except Exception:
             _LOGGER.exception("CANtera update installation failed")
