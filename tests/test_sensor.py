@@ -177,7 +177,7 @@ async def test_async_setup_entry_creates_all_pid_sensors(hass, mock_entry, coord
     add_entities = MagicMock(side_effect=lambda entities: added.extend(entities))
     await async_setup_entry(hass, mock_entry, add_entities)
 
-    expected_count = 1 + len(MODE01_PIDS) + len(MODE09_PIDS)  # sync + mode01 + mode09
+    expected_count = 1 + 1 + len(MODE01_PIDS) + len(MODE09_PIDS)  # sync + firmware_version + mode01 + mode09
     assert len(added) == expected_count
 
 

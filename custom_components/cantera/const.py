@@ -19,6 +19,8 @@ SSE_ENDPOINT = "/events"
 HEALTH_ENDPOINT = "/api/health"
 HISTORY_ENDPOINT = "/api/history"
 DEVICE_ENDPOINT = "/api/device"
+FIRMWARE_UPDATE_ENDPOINT = "/api/update"
+FIRMWARE_INSTALL_ENDPOINT = "/api/update/install"
 
 # Health polling
 HEALTH_POLL_INTERVAL_S = 5

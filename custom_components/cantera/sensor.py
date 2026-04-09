@@ -72,7 +72,11 @@ async def async_setup_entry(
         CanteraSensor(coordinator, name, unit, entry, is_diagnostic=True)
         for name, unit in MODE09_PIDS
     ]
-    async_add_entities([CanteraSyncStatusSensor(coordinator, entry), *pid_sensors])
+    async_add_entities([
+        CanteraSyncStatusSensor(coordinator, entry),
+        CanteraFirmwareVersionSensor(coordinator, entry),
+        *pid_sensors,
+    ])
 
 
 class CanteraSensor(RestoreSensor):
@@ -266,4 +270,40 @@ class CanteraSyncStatusSensor(SensorEntity):
     def _handle_health_update(self, _health_data: dict) -> None:
         """Refresh state whenever the health poll fires."""
         self.async_write_ha_state()
+
+
+# ---------------------------------------------------------------------------
+# Firmware version sensor
+# ---------------------------------------------------------------------------
+
+
+class CanteraFirmwareVersionSensor(SensorEntity):
+    """Shows the version of the currently running Pi firmware."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Pi Firmware Version"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:chip"
+
+    def __init__(
+        self,
+        coordinator: CanteraCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__()
+        self._coordinator = coordinator
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_firmware_version"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return self._coordinator.device_info
+
+    @property
+    def native_value(self) -> str | None:
+        return self._coordinator.health_data.get("version")
+
+    @property
+    def available(self) -> bool:
+        return True
 
