@@ -13,7 +13,6 @@ from datetime import timedelta
 from typing import Any
 
 import aiohttp
-
 from homeassistant.components.update import (
     UpdateEntity,
     UpdateEntityFeature,
@@ -107,16 +106,19 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
         url = f"http://{host}:{port}{FIRMWARE_UPDATE_ENDPOINT}"
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        self._latest_version = data.get("latest_version")
-                        self._release_notes = data.get("release_notes")
-                        self._release_url = data.get("release_url")
-                    elif resp.status == 503:
-                        _LOGGER.debug("Firmware updater disabled on Pi")
-        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            _timeout = aiohttp.ClientTimeout(total=10)
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(url, timeout=_timeout) as resp,
+            ):
+                if resp.status == 200:
+                    data = await resp.json()
+                    self._latest_version = data.get("latest_version")
+                    self._release_notes = data.get("release_notes")
+                    self._release_url = data.get("release_url")
+                elif resp.status == 503:
+                    _LOGGER.debug("Firmware updater disabled on Pi")
+        except (TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.debug("Firmware update check failed: %s", err)
 
     async def async_install(
@@ -133,17 +135,16 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
             payload["version"] = version
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    install_url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status not in (200, 202):
-                        body = await resp.text()
-                        _LOGGER.error("Install request rejected (%s): %s", resp.status, body)
-                        return
-        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            async with aiohttp.ClientSession() as session, session.post(
+                install_url,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status not in (200, 202):
+                    body = await resp.text()
+                    _LOGGER.error("Install request rejected (%s): %s", resp.status, body)
+                    return
+        except (TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.error("Install request failed: %s", err)
             return
 
@@ -157,20 +158,19 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
         while asyncio.get_event_loop().time() < deadline:
             await asyncio.sleep(_INSTALL_POLL_INTERVAL_S)
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        health_url, timeout=aiohttp.ClientTimeout(total=5)
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data.get("version") != old_version:
-                                _LOGGER.info(
-                                    "Firmware updated: %s → %s",
-                                    old_version,
-                                    data.get("version"),
-                                )
-                                break
-            except (aiohttp.ClientError, asyncio.TimeoutError):
+                async with aiohttp.ClientSession() as session, session.get(
+                    health_url, timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get("version") != old_version:
+                            _LOGGER.info(
+                                "Firmware updated: %s → %s",
+                                old_version,
+                                data.get("version"),
+                            )
+                            break
+            except (TimeoutError, aiohttp.ClientError):
                 pass  # Pi may be restarting; keep polling
 
         self._attr_in_progress = False

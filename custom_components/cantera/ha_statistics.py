@@ -5,7 +5,11 @@ import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
+from homeassistant.components.recorder.models import (
+    StatisticData,
+    StatisticMeanType,
+    StatisticMetaData,
+)
 from homeassistant.components.recorder.statistics import async_add_external_statistics
 from homeassistant.util.dt import utc_from_timestamp
 
@@ -72,11 +76,12 @@ async def import_statistics(
         source = DOMAIN
 
         metadata = StatisticMetaData(
-            has_mean=True,
+            mean_type=StatisticMeanType.ARITHMETIC,
             has_sum=False,
             name=pid_name,
             source=source,
             statistic_id=statistic_id,
+            unit_class=None,
             unit_of_measurement=unit or None,
         )
 

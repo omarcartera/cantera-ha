@@ -94,9 +94,7 @@ def _async_remove_stale_entities(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate old config entry to the current version."""
-    if entry.version == 1:
-        return True
-    return False
+    return entry.version == 1
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

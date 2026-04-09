@@ -58,7 +58,7 @@ class CanteraCoordinator:
         self._reading_listeners: dict[str, list[Callable[[dict], None]]] = defaultdict(list)
         self._sse_task: asyncio.Task | None = None
         self._pid_units: dict[str, str] = {}
-        self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        self._store: Store[dict] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._connected: bool = False
         self._connection_listeners: list[Callable[[], None]] = []
 
@@ -174,9 +174,11 @@ class CanteraCoordinator:
         # Declare car_off only after the condition has persisted long enough.
         # This prevents the sensor from flickering when the ECU briefly stops
         # responding between OBD poll cycles but quickly comes back.
-        if self._car_off_since_mono is not None:
-            if time.monotonic() - self._car_off_since_mono >= SYNC_CAR_OFF_DEBOUNCE_S:
-                return SYNC_STATUS_CAR_OFF
+        if (
+            self._car_off_since_mono is not None
+            and time.monotonic() - self._car_off_since_mono >= SYNC_CAR_OFF_DEBOUNCE_S
+        ):
+            return SYNC_STATUS_CAR_OFF
         return SYNC_STATUS_LIVE
 
     def add_health_listener(self, cb: Callable[[dict], None]) -> None:
@@ -345,8 +347,7 @@ class CanteraCoordinator:
             )
 
         _LOGGER.info("Connecting to CANtera SSE stream at %s", url)
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=timeout) as resp:
+        async with aiohttp.ClientSession() as session, session.get(url, timeout=timeout) as resp:
                 if resp.status != 200:
                     raise ConnectionError(f"SSE returned HTTP {resp.status}")
                 self._set_connected(True)
@@ -412,7 +413,7 @@ class CanteraCoordinator:
 
                 last_imported_ts = max(r["ts"] for r in readings)
                 await self._save_last_sync(last_imported_ts)
-        except (TimeoutError, asyncio.TimeoutError, aiohttp.ClientError) as exc:
+        except (TimeoutError, aiohttp.ClientError) as exc:
             # Pi offline or unreachable — expected during startup or when the car
             # is off.  Log at DEBUG so HA logs stay clean.
             _LOGGER.debug("History backfill skipped (Pi not reachable): %s", exc)

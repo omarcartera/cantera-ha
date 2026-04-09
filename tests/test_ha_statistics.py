@@ -1,6 +1,8 @@
 """Tests for ha_statistics module."""
 from unittest.mock import patch
 
+from homeassistant.components.recorder.models import StatisticMeanType
+
 from custom_components.cantera.ha_statistics import (
     BUCKET_S,
     _bucket_start,
@@ -120,7 +122,8 @@ async def test_import_statistics_calls_add_external_statistics(hass):
     _, metadata, stats = mock_add.call_args.args
     assert metadata["name"] == "Engine RPM"
     assert metadata["unit_of_measurement"] == "rpm"
-    assert metadata["has_mean"] is True
+    assert metadata["mean_type"] == StatisticMeanType.ARITHMETIC
+    assert metadata["unit_class"] is None
     assert metadata["has_sum"] is False
     assert len(stats) == 1
     assert stats[0]["mean"] == 2500.0
