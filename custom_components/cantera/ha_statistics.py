@@ -19,6 +19,11 @@ _LOGGER = logging.getLogger(__name__)
 BUCKET_S = HISTORY_BUCKET_MINUTES * 60
 
 
+def build_statistic_ids(pid_names: list[str]) -> list[str]:
+    """Return the external statistic IDs for the given PID display names."""
+    return [f"{DOMAIN}:{name.lower().replace(' ', '_')}" for name in pid_names]
+
+
 def _bucket_start(ts_ms: int) -> int:
     """Round timestamp down to bucket boundary (in seconds)."""
     ts_s = ts_ms // 1000

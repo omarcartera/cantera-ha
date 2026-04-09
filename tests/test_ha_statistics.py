@@ -5,6 +5,7 @@ from custom_components.cantera.ha_statistics import (
     BUCKET_S,
     _bucket_start,
     aggregate_readings,
+    build_statistic_ids,
     import_statistics,
 )
 
@@ -168,3 +169,25 @@ async def test_import_statistics_multiple_pids(hass):
         await import_statistics(hass, readings, pid_units)
 
     assert mock_add.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# build_statistic_ids
+# ---------------------------------------------------------------------------
+
+def test_build_statistic_ids_formats_correctly():
+    """build_statistic_ids returns domain-prefixed, lower-snake IDs."""
+    from custom_components.cantera.const import DOMAIN
+    ids = build_statistic_ids(["Engine RPM", "Vehicle Speed"])
+    assert ids == [f"{DOMAIN}:engine_rpm", f"{DOMAIN}:vehicle_speed"]
+
+
+def test_build_statistic_ids_empty():
+    ids = build_statistic_ids([])
+    assert ids == []
+
+
+def test_build_statistic_ids_already_lowercase():
+    from custom_components.cantera.const import DOMAIN
+    ids = build_statistic_ids(["coolant_temp"])
+    assert ids == [f"{DOMAIN}:coolant_temp"]
