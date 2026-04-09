@@ -62,6 +62,8 @@ class CanteraCoordinator:
         self._health_unsub: Callable | None = None
         # True while history backfill is in progress for the current connection.
         self._backfilling: bool = False
+        # Task handle for the background backfill so we never double-start it.
+        self._backfill_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Public API — SSE readings
@@ -164,12 +166,17 @@ class CanteraCoordinator:
         self._hass.async_create_task(self._poll_health())
 
     async def stop(self) -> None:
-        """Stop the SSE loop and health polling."""
+        """Stop the SSE loop, health polling, and any in-progress backfill."""
         if self._health_unsub is not None:
             self._health_unsub()
             self._health_unsub = None
         self._set_connected(False)
         self._api_reachable = False
+        if self._backfill_task and not self._backfill_task.done():
+            self._backfill_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._backfill_task
+            self._backfill_task = None
         if self._sse_task:
             self._sse_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -228,14 +235,26 @@ class CanteraCoordinator:
             await asyncio.sleep(SSE_RECONNECT_DELAY_S)
 
     async def _connect_and_stream(self) -> None:
-        """Single SSE connection attempt: backfill history, then stream."""
+        """Start backfill concurrently then stream live SSE data.
+
+        Backfill runs as a background task so the SSE stream starts immediately
+        — this lets live data flow in while historical gaps are being filled,
+        maximising use of the potentially short window we have wifi access.
+
+        A guard prevents a second backfill from starting if one is already
+        running from a previous (quickly-lost) connection attempt.
+        """
         url = f"{self._base_url}{SSE_ENDPOINT}"
         timeout = aiohttp.ClientTimeout(connect=10, sock_read=None)
 
-        async with aiohttp.ClientSession() as session:
-            await self._backfill_history(session)
+        # Launch backfill concurrently, but only if not already in flight.
+        if self._backfill_task is None or self._backfill_task.done():
+            self._backfill_task = self._hass.async_create_task(
+                self._backfill_history()
+            )
 
-            _LOGGER.info("Connecting to CANtera SSE stream at %s", url)
+        _LOGGER.info("Connecting to CANtera SSE stream at %s", url)
+        async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=timeout) as resp:
                 if resp.status != 200:
                     raise ConnectionError(f"SSE returned HTTP {resp.status}")
@@ -261,10 +280,12 @@ class CanteraCoordinator:
                     elif text == "":
                         event_type = None
 
-    async def _backfill_history(
-        self, session: aiohttp.ClientSession
-    ) -> None:
-        """Fetch /api/history for the gap since last sync, import stats."""
+    async def _backfill_history(self) -> None:
+        """Fetch /api/history for the gap since last sync, import stats.
+
+        Uses its own aiohttp session so it can run concurrently with the SSE
+        stream on a separate connection.
+        """
         self._backfilling = True
         self._notify_health_listeners()
         try:
@@ -275,7 +296,7 @@ class CanteraCoordinator:
                 f"{self._base_url}{HISTORY_ENDPOINT}"
                 f"?start={last_sync_ms}&end={now_ms}"
             )
-            async with session.get(
+            async with aiohttp.ClientSession() as session, session.get(
                 history_url, timeout=aiohttp.ClientTimeout(total=30)
             ) as resp:
                 if resp.status != 200:

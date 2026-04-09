@@ -116,9 +116,10 @@ class CanteraSensor(RestoreSensor):
         self._slug = slug
 
     async def async_added_to_hass(self) -> None:
-        """Register callback and restore state when added to HA."""
+        """Register callbacks and restore state when added to HA."""
         await super().async_added_to_hass()
         self._coordinator.add_reading_listener(self._handle_reading)
+        self._coordinator.add_health_listener(self._handle_health_update)
         if (last_data := await self.async_get_last_sensor_data()) is not None:
             self._attr_native_value = last_data.native_value
             if last_data.native_unit_of_measurement:
@@ -127,8 +128,19 @@ class CanteraSensor(RestoreSensor):
                 )
 
     async def async_will_remove_from_hass(self) -> None:
-        """Unregister callback when entity is removed from HA."""
+        """Unregister callbacks when entity is removed from HA."""
         self._coordinator.remove_reading_listener(self._handle_reading)
+        self._coordinator.remove_health_listener(self._handle_health_update)
+
+    @property
+    def available(self) -> bool:
+        """Sensor is available only while live data is flowing.
+
+        When the car is off or the RPi is unreachable the sensor shows as
+        Unavailable (grayed out) in HA rather than displaying the stale
+        value from the previous session.
+        """
+        return self._coordinator.sync_status == SYNC_STATUS_LIVE
 
     @property
     def should_poll(self) -> bool:
@@ -142,6 +154,11 @@ class CanteraSensor(RestoreSensor):
         if pid_slug == self._slug:
             self._attr_native_value = reading.get("value")
             self.async_write_ha_state()
+
+    @callback
+    def _handle_health_update(self, _health_data: dict) -> None:
+        """Re-evaluate availability whenever the health state changes."""
+        self.async_write_ha_state()
 
 
 # ---------------------------------------------------------------------------

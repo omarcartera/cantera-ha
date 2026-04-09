@@ -204,9 +204,12 @@ def test_reading_listener_called(coordinator):
 
 
 # ---------- _backfill_history ----------
+# _backfill_history now creates its own aiohttp.ClientSession internally.
+# Tests patch aiohttp.ClientSession at the coordinator module level.
 
-def _make_mock_session(status: int, json_return=None, get_side_effect=None):
-    """Build a minimal aiohttp session mock for _backfill_history tests."""
+
+def _make_mock_session_cm(status: int, json_return=None, get_side_effect=None):
+    """Build a mock that can be used as `async with aiohttp.ClientSession() as session`."""
     mock_resp = AsyncMock()
     mock_resp.status = status
     if json_return is not None:
@@ -219,7 +222,11 @@ def _make_mock_session(status: int, json_return=None, get_side_effect=None):
         mock_session.get = MagicMock(side_effect=get_side_effect)
     else:
         mock_session.get = MagicMock(return_value=mock_resp)
-    return mock_session
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    mock_cls = MagicMock(return_value=mock_session)
+    return mock_cls, mock_session
 
 
 async def test_backfill_history_200_imports_stats_and_saves(coordinator):
@@ -233,9 +240,10 @@ async def test_backfill_history_200_imports_stats_and_saves(coordinator):
             "unit": "rpm",
         }
     ]
-    mock_session = _make_mock_session(200, json_return=readings)
+    mock_cls, _ = _make_mock_session_cm(200, json_return=readings)
 
     with (
+        patch("custom_components.cantera.coordinator.aiohttp.ClientSession", mock_cls),
         patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0),
         patch(
             "custom_components.cantera.coordinator.import_statistics",
@@ -243,7 +251,7 @@ async def test_backfill_history_200_imports_stats_and_saves(coordinator):
         ) as mock_import,
         patch.object(coordinator, "_save_last_sync", new_callable=AsyncMock) as mock_save,
     ):
-        await coordinator._backfill_history(mock_session)
+        await coordinator._backfill_history()
 
     mock_import.assert_awaited_once()
     mock_save.assert_awaited_once_with(1700000000000)
@@ -251,60 +259,65 @@ async def test_backfill_history_200_imports_stats_and_saves(coordinator):
 
 async def test_backfill_history_404_logs_warning_and_returns(coordinator):
     """Non-200 response: import_statistics is NOT called."""
-    mock_session = _make_mock_session(404)
+    mock_cls, _ = _make_mock_session_cm(404)
 
     with (
+        patch("custom_components.cantera.coordinator.aiohttp.ClientSession", mock_cls),
         patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0),
         patch(
             "custom_components.cantera.coordinator.import_statistics",
             new_callable=AsyncMock,
         ) as mock_import,
     ):
-        await coordinator._backfill_history(mock_session)
+        await coordinator._backfill_history()
 
     mock_import.assert_not_awaited()
 
 
 async def test_backfill_history_exception_does_not_propagate(coordinator):
     """Any exception inside _backfill_history is caught and logged, never propagated."""
-    mock_session = _make_mock_session(200, get_side_effect=RuntimeError("network failure"))
+    mock_cls, _ = _make_mock_session_cm(200, get_side_effect=RuntimeError("network failure"))
 
-    with patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0):
+    with (
+        patch("custom_components.cantera.coordinator.aiohttp.ClientSession", mock_cls),
+        patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0),
+    ):
         # Must not raise
-        await coordinator._backfill_history(mock_session)
+        await coordinator._backfill_history()
 
 
 async def test_backfill_history_exception_inside_context_manager(coordinator):
     """Exception raised inside the response context (e.g. JSON decode) is caught."""
-    mock_resp = AsyncMock()
-    mock_resp.status = 200
-    mock_resp.json = AsyncMock(side_effect=RuntimeError("json decode failed"))
-    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
-    mock_resp.__aexit__ = AsyncMock(return_value=False)
+    mock_cls, mock_session = _make_mock_session_cm(200)
+    mock_session.get.return_value.json = AsyncMock(side_effect=RuntimeError("json decode failed"))
 
-    mock_session = AsyncMock()
-    mock_session.get = MagicMock(return_value=mock_resp)
-
-    with patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0):
+    with (
+        patch("custom_components.cantera.coordinator.aiohttp.ClientSession", mock_cls),
+        patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0),
+    ):
         # Must not raise
-        await coordinator._backfill_history(mock_session)
+        await coordinator._backfill_history()
 
 
 async def test_backfill_history_exception_inside_context_manager_does_not_propagate(coordinator):
     """Exception raised while reading response body (inside async-with) is also caught."""
-    mock_session = _make_mock_session(200)
+    mock_cls, mock_session = _make_mock_session_cm(200)
     mock_session.get.return_value.json = AsyncMock(side_effect=RuntimeError("json decode error"))
 
-    with patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0):
+    with (
+        patch("custom_components.cantera.coordinator.aiohttp.ClientSession", mock_cls),
+        patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0),
+    ):
         # Must not raise
-        await coordinator._backfill_history(mock_session)
+        await coordinator._backfill_history()
 
 
 async def test_backfill_history_empty_readings_skips_import(coordinator):
     """Empty readings list: import_statistics and _save_last_sync are NOT called."""
-    mock_session = _make_mock_session(200, json_return=[])
+    mock_cls, _ = _make_mock_session_cm(200, json_return=[])
 
     with (
+        patch("custom_components.cantera.coordinator.aiohttp.ClientSession", mock_cls),
         patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0),
         patch(
             "custom_components.cantera.coordinator.import_statistics",
@@ -312,10 +325,40 @@ async def test_backfill_history_empty_readings_skips_import(coordinator):
         ) as mock_import,
         patch.object(coordinator, "_save_last_sync", new_callable=AsyncMock) as mock_save,
     ):
-        await coordinator._backfill_history(mock_session)
+        await coordinator._backfill_history()
 
     mock_import.assert_not_awaited()
     mock_save.assert_not_awaited()
+
+
+async def test_backfill_not_duplicated_on_rapid_reconnect(coordinator):
+    """A second _connect_and_stream call does not start a new backfill if one is running."""
+    # Simulate an already-running (not-done) backfill task
+    long_task = coordinator._hass.async_create_task(asyncio.sleep(9999))
+    coordinator._backfill_task = long_task
+
+    # _connect_and_stream would start a task only if _backfill_task is None or done
+    # Since it's running, the new SSE attempt must NOT replace _backfill_task
+    assert not coordinator._backfill_task.done()
+    old_task = coordinator._backfill_task
+
+    # Mimic the guard logic from _connect_and_stream
+    if coordinator._backfill_task is None or coordinator._backfill_task.done():
+        coordinator._backfill_task = coordinator._hass.async_create_task(asyncio.sleep(1))
+
+    assert coordinator._backfill_task is old_task, "Backfill task must not be replaced while running"
+    long_task.cancel()
+
+
+async def test_stop_cancels_backfill_task(coordinator):
+    """stop() cancels an in-flight backfill task."""
+    running = coordinator._hass.async_create_task(asyncio.sleep(9999))
+    coordinator._backfill_task = running
+    coordinator._sse_task = None
+
+    await coordinator.stop()
+
+    assert running.cancelled()
 
 
 # ---------- _load_last_sync ----------

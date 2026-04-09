@@ -297,3 +297,53 @@ async def test_async_setup_entry_adds_sync_status_sensor(hass, mock_entry, coord
     sync_sensors = [e for e in added if isinstance(e, CanteraSyncStatusSensor)]
     assert len(sync_sensors) == 1
 
+
+# ---------- CanteraSensor availability ----------
+
+def test_sensor_unavailable_when_api_offline(sensor, coordinator):
+    """Sensor reports unavailable when sync_status is api_offline."""
+    coordinator._api_reachable = False
+    # No health data → api_offline
+    assert coordinator.sync_status == SYNC_STATUS_API_OFFLINE
+    assert sensor.available is False
+
+
+def test_sensor_unavailable_when_car_off(sensor, coordinator):
+    """Sensor reports unavailable when car is off (no recent reading)."""
+    coordinator._api_reachable = True
+    coordinator._health_data = {"can_connected": False, "last_reading_ms": 0}
+    assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
+    assert sensor.available is False
+
+
+def test_sensor_available_when_live(sensor, coordinator):
+    """Sensor reports available only when sync_status is live."""
+    import time as _time
+    coordinator._api_reachable = True
+    coordinator._health_data = {
+        "can_connected": True,
+        "last_reading_ms": int(_time.time() * 1000) - 2000,
+    }
+    assert coordinator.sync_status == SYNC_STATUS_LIVE
+    assert sensor.available is True
+
+
+def test_sensor_unavailable_during_syncing(sensor, coordinator):
+    """Sensor is unavailable while backfill is in progress (not yet live)."""
+    import time as _time
+    coordinator._api_reachable = True
+    coordinator._backfilling = True
+    coordinator._health_data = {
+        "can_connected": True,
+        "last_reading_ms": int(_time.time() * 1000) - 2000,
+    }
+    # syncing ≠ live
+    assert coordinator.sync_status == SYNC_STATUS_SYNCING
+    assert sensor.available is False
+
+
+def test_sensor_health_update_triggers_write(sensor):
+    """_handle_health_update calls async_write_ha_state to refresh availability."""
+    sensor._handle_health_update({"can_connected": True})
+    sensor.async_write_ha_state.assert_called_once()
+
