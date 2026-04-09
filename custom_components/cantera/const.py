@@ -5,6 +5,7 @@ DOMAIN = "cantera"
 # GitHub repository used for release discovery and self-update.
 GITHUB_REPO = "omarcartera/cantera-ha"
 GITHUB_RELEASES_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
+GITHUB_TAGS_URL = f"https://api.github.com/repos/{GITHUB_REPO}/tags"
 GITHUB_API_HEADERS = {
     "Accept": "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",

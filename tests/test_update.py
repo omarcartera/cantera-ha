@@ -8,11 +8,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.cantera.const import DOMAIN, GITHUB_RELEASES_URL
+from custom_components.cantera.const import DOMAIN, GITHUB_RELEASES_URL, GITHUB_TAGS_URL
 from custom_components.cantera.update import (
     CanteraUpdateEntity,
     _copy_tree,
+    _is_semver,
     _read_manifest_version,
+    _semver_key,
 )
 
 
@@ -165,12 +167,82 @@ async def test_async_update_network_error_does_not_raise(entity):
     assert entity.latest_version is None
 
 
-async def test_async_update_empty_releases_list(entity):
-    """Empty releases list leaves state unchanged."""
-    mock_session, _ = _make_session_mock(200, json_return=[])
+async def test_async_update_empty_releases_falls_back_to_tags(entity):
+    """When releases API returns [], latest_version is resolved via the tags API."""
+    fake_tags = [
+        {"name": "v0.3.0", "zipball_url": "https://example.com/z/v0.3.0"},
+        {"name": "v0.2.0", "zipball_url": "https://example.com/z/v0.2.0"},
+        {"name": "tested-on-car", "zipball_url": "https://example.com/z/misc"},
+    ]
+
+    def _make_resp(status, json_return):
+        resp = AsyncMock()
+        resp.status = status
+        resp.json = AsyncMock(return_value=json_return)
+        resp.__aenter__ = AsyncMock(return_value=resp)
+        resp.__aexit__ = AsyncMock(return_value=False)
+        return resp
+
+    releases_resp = _make_resp(200, [])
+    tags_resp = _make_resp(200, fake_tags)
+
+    mock_session = MagicMock()
+    mock_session.get = MagicMock(side_effect=[releases_resp, tags_resp])
+
     with patch("custom_components.cantera.update.async_get_clientsession", return_value=mock_session):
         await entity.async_update()
-    assert entity.latest_version is None
+
+    assert entity.latest_version == "0.3.0"
+    assert entity._releases[0]["tag_name"] == "v0.3.0"
+
+
+async def test_async_update_empty_releases_ignores_non_semver_tags(entity):
+    """Tags fallback must ignore non-semver tags like 'tested-on-car'."""
+    fake_tags = [
+        {"name": "tested-on-car", "zipball_url": "https://example.com/z/misc"},
+        {"name": "v0.2.0", "zipball_url": "https://example.com/z/v0.2.0"},
+    ]
+
+    def _make_resp(status, json_return):
+        resp = AsyncMock()
+        resp.status = status
+        resp.json = AsyncMock(return_value=json_return)
+        resp.__aenter__ = AsyncMock(return_value=resp)
+        resp.__aexit__ = AsyncMock(return_value=False)
+        return resp
+
+    releases_resp = _make_resp(200, [])
+    tags_resp = _make_resp(200, fake_tags)
+
+    mock_session = MagicMock()
+    mock_session.get = MagicMock(side_effect=[releases_resp, tags_resp])
+
+    with patch("custom_components.cantera.update.async_get_clientsession", return_value=mock_session):
+        await entity.async_update()
+
+    assert entity.latest_version == "0.2.0"
+
+
+# ---------------------------------------------------------------------------
+# _is_semver / _semver_key helpers
+# ---------------------------------------------------------------------------
+
+def test_is_semver_accepts_valid_tags():
+    assert _is_semver("v0.3.0") is True
+    assert _is_semver("0.3.0") is True
+    assert _is_semver("1.2.3") is True
+
+
+def test_is_semver_rejects_invalid_tags():
+    assert _is_semver("tested-on-car") is False
+    assert _is_semver("v1.2") is False
+    assert _is_semver("") is False
+
+
+def test_semver_key_ordering():
+    tags = ["v0.2.0", "v0.10.0", "v0.3.0", "v1.0.0"]
+    sorted_tags = sorted(tags, key=_semver_key, reverse=True)
+    assert sorted_tags == ["v1.0.0", "v0.10.0", "v0.3.0", "v0.2.0"]
 
 
 # ---------------------------------------------------------------------------

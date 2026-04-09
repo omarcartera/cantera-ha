@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re as _re
 import shutil
 import tempfile
 import zipfile
@@ -37,12 +38,28 @@ from .const import (
     DOMAIN,
     GITHUB_API_HEADERS,
     GITHUB_RELEASES_URL,
+    GITHUB_TAGS_URL,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 # Check GitHub once per hour — well within their 60 req/h unauthenticated limit.
 SCAN_INTERVAL = timedelta(hours=1)
+
+_SEMVER_RE = _re.compile(r'^v?(\d+)\.(\d+)\.(\d+)$')
+
+
+def _is_semver(tag: str) -> bool:
+    """Return True if *tag* is a plain semver string (vX.Y.Z or X.Y.Z)."""
+    return bool(_SEMVER_RE.match(tag))
+
+
+def _semver_key(tag: str) -> tuple[int, int, int]:
+    """Return a comparable tuple for a semver tag string."""
+    m = _SEMVER_RE.match(tag)
+    if not m:
+        return (0, 0, 0)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
 
 _MANIFEST_PATH = Path(__file__).parent / "manifest.json"
 
@@ -137,13 +154,14 @@ class CanteraUpdateEntity(UpdateEntity):
     # ------------------------------------------------------------------ #
 
     async def async_update(self) -> None:
-        """Fetch all releases from GitHub and update internal state.
+        """Fetch releases (or tags as fallback) from GitHub and update state.
 
-        Failures are logged but never propagate — the entity stays at its
-        last known state rather than becoming unavailable.
+        Tries the releases API first.  When no releases are published yet,
+        falls back to the tags API so the version is never stuck at Unknown.
+        Failures are logged but never propagate.
         """
+        session = async_get_clientsession(self._hass)
         try:
-            session = async_get_clientsession(self._hass)
             async with session.get(
                 GITHUB_RELEASES_URL,
                 headers=GITHUB_API_HEADERS,
@@ -159,14 +177,59 @@ class CanteraUpdateEntity(UpdateEntity):
             _LOGGER.exception("Failed to fetch CANtera releases from GitHub")
             return
 
-        if not self._releases:
+        if self._releases:
+            latest = self._releases[0]
+            tag = latest.get("tag_name", "").lstrip("v")
+            self._latest_version = tag or None
+            self._release_notes_cache = latest.get("body") or None
+            self._release_url_cache = latest.get("html_url") or None
             return
 
-        latest = self._releases[0]
-        tag = latest.get("tag_name", "").lstrip("v")
-        self._latest_version = tag or None
-        self._release_notes_cache = latest.get("body") or None
-        self._release_url_cache = latest.get("html_url") or None
+        # No GitHub releases published yet — fall back to the tags API so
+        # latest_version is still resolved (avoids "Unknown" in the UI).
+        _LOGGER.debug("No GitHub releases found; falling back to tags API")
+        try:
+            async with session.get(
+                GITHUB_TAGS_URL,
+                headers=GITHUB_API_HEADERS,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.warning(
+                        "GitHub tags API returned HTTP %d", resp.status
+                    )
+                    return
+                tags: list[dict] = await resp.json()
+        except Exception:
+            _LOGGER.exception("Failed to fetch CANtera tags from GitHub")
+            return
+
+        semver_tags = [t for t in tags if _is_semver(t.get("name", ""))]
+        if not semver_tags:
+            return
+
+        semver_tags.sort(key=lambda t: _semver_key(t["name"]), reverse=True)
+        latest_tag = semver_tags[0]
+        tag_name = latest_tag["name"]
+        version = tag_name.lstrip("v")
+        self._latest_version = version
+        self._release_notes_cache = None
+        self._release_url_cache = (
+            f"https://github.com/omarcartera/cantera-ha/releases/tag/{tag_name}"
+        )
+        # Normalise tag entries into release-shaped dicts so _find_release
+        # and async_install work without changes.
+        self._releases = [
+            {
+                "tag_name": t["name"],
+                "zipball_url": t.get("zipball_url"),
+                "body": None,
+                "html_url": (
+                    f"https://github.com/omarcartera/cantera-ha/releases/tag/{t['name']}"
+                ),
+            }
+            for t in semver_tags
+        ]
 
     # ------------------------------------------------------------------ #
     # Release notes (called by HA when user opens "What's new")            #
