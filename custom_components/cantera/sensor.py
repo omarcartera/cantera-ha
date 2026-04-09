@@ -19,6 +19,8 @@ from .const import (
     DEVICE_MANUFACTURER,
     DEVICE_MODEL,
     DOMAIN,
+    MODE01_PIDS,
+    MODE09_PIDS,
     SYNC_STATUS_API_OFFLINE,
     SYNC_STATUS_CAR_OFF,
     SYNC_STATUS_LIVE,
@@ -51,47 +53,50 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up CANtera sensors from a config entry."""
+    """Set up CANtera sensors from a config entry.
+
+    All Mode 01 and Mode 09 PID sensors are created immediately at setup with
+    a ``None`` initial value.  Values are populated as SSE readings arrive.
+    Pre-creating every sensor means the user sees the full sensor list in HA
+    right after installation, regardless of which PIDs the vehicle supports.
+    """
     coordinator: CanteraCoordinator = hass.data[DOMAIN][entry.entry_id]
-    known_pids: set[str] = set()
 
-    # Register the static sync-status sensor immediately.
-    async_add_entities([CanteraSyncStatusSensor(coordinator)])
-
-    @callback
-    def _on_reading(reading: dict) -> None:
-        pid = reading.get("pid", "")
-        slug = pid.lower().replace(" ", "_")
-        if slug and slug not in known_pids:
-            known_pids.add(slug)
-            async_add_entities([CanteraSensor(coordinator, reading)])
-
-    coordinator.add_reading_listener(_on_reading)
-    entry.async_on_unload(lambda: coordinator.remove_reading_listener(_on_reading))
+    pid_sensors = [
+        CanteraSensor(coordinator, name, unit)
+        for name, unit in (MODE01_PIDS + MODE09_PIDS)
+    ]
+    async_add_entities([CanteraSyncStatusSensor(coordinator), *pid_sensors])
 
 
 class CanteraSensor(RestoreSensor):
-    """A single OBD PID sensor entity."""
+    """A single OBD PID sensor entity.
+
+    Created upfront for every known Mode 01 and Mode 09 PID.  The initial
+    ``native_value`` is ``None`` and is populated when an SSE reading with a
+    matching PID name arrives, or restored from HA storage on restart.
+    """
 
     def __init__(
-        self, coordinator: CanteraCoordinator, initial_reading: dict
+        self,
+        coordinator: CanteraCoordinator,
+        name: str,
+        unit: str | None = None,
     ) -> None:
-        """Initialise from the first reading for this PID."""
+        """Initialise sensor for the given PID name and unit."""
         super().__init__()
         self._coordinator = coordinator
-        pid_name: str = initial_reading["pid"]
-        unit: str = initial_reading.get("unit", "")
-        slug = pid_name.lower().replace(" ", "_")
+        slug = name.lower().replace(" ", "_")
 
         self._attr_unique_id = f"{DOMAIN}_{slug}"
-        self._attr_name = pid_name
-        self._attr_native_unit_of_measurement = unit or None
-        self._attr_native_value = initial_reading.get("value")
+        self._attr_name = name
+        self._attr_native_unit_of_measurement = unit
+        self._attr_native_value = None
 
-        dc_str = UNIT_DEVICE_CLASS_MAP.get(unit)
+        dc_str = UNIT_DEVICE_CLASS_MAP.get(unit) if unit else None
         self._attr_device_class = _DEVICE_CLASS_LOOKUP.get(dc_str) if dc_str else None
 
-        sc_str = UNIT_STATE_CLASS_MAP.get(unit, "measurement")
+        sc_str = UNIT_STATE_CLASS_MAP.get(unit, "measurement") if unit else "measurement"
         self._attr_state_class = (
             _STATE_CLASS_LOOKUP.get(sc_str, SensorStateClass.MEASUREMENT)
             if sc_str

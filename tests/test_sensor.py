@@ -11,6 +11,8 @@ from custom_components.cantera.const import (
     DEVICE_MANUFACTURER,
     DEVICE_MODEL,
     DOMAIN,
+    MODE01_PIDS,
+    MODE09_PIDS,
     SYNC_STALE_THRESHOLD_S,
     SYNC_STATUS_API_OFFLINE,
     SYNC_STATUS_CAR_OFF,
@@ -39,14 +41,9 @@ def coordinator(hass, mock_entry):
 
 
 @pytest.fixture
-def sample_reading():
-    return {"pid": "Engine RPM", "value": 2400.0, "unit": "rpm"}
-
-
-@pytest.fixture
-def sensor(coordinator, sample_reading):
-    s = CanteraSensor(coordinator, sample_reading)
-    # Stub async_write_ha_state so tests don't need full HA entity platform
+def sensor(coordinator):
+    """Pre-created sensor for Engine RPM (new constructor signature)."""
+    s = CanteraSensor(coordinator, "Engine RPM", "rpm")
     s.async_write_ha_state = MagicMock()
     return s
 
@@ -65,8 +62,9 @@ def test_sensor_native_unit(sensor):
     assert sensor._attr_native_unit_of_measurement == "rpm"
 
 
-def test_sensor_initial_value(sensor):
-    assert sensor._attr_native_value == 2400.0
+def test_sensor_initial_value_is_none(sensor):
+    """Pre-created sensors start with None — value arrives via SSE."""
+    assert sensor._attr_native_value is None
 
 
 def test_sensor_device_info(sensor):
@@ -78,32 +76,28 @@ def test_sensor_device_info(sensor):
 
 def test_sensor_no_unit(coordinator):
     """Sensor with no unit gets None for native_unit_of_measurement."""
-    reading = {"pid": "DTC Count", "value": 3}
-    s = CanteraSensor(coordinator, reading)
+    s = CanteraSensor(coordinator, "Freeze DTC")
     assert s._attr_native_unit_of_measurement is None
 
 
 def test_sensor_km_h_device_class(coordinator):
     """km/h maps to SensorDeviceClass.SPEED."""
     from homeassistant.components.sensor import SensorDeviceClass
-    reading = {"pid": "Vehicle Speed", "value": 60.0, "unit": "km/h"}
-    s = CanteraSensor(coordinator, reading)
+    s = CanteraSensor(coordinator, "Vehicle Speed", "km/h")
     assert s._attr_device_class == SensorDeviceClass.SPEED
 
 
 def test_sensor_temperature_device_class(coordinator):
     """°C maps to SensorDeviceClass.TEMPERATURE."""
     from homeassistant.components.sensor import SensorDeviceClass
-    reading = {"pid": "Coolant Temp", "value": 90.0, "unit": "°C"}
-    s = CanteraSensor(coordinator, reading)
+    s = CanteraSensor(coordinator, "Engine Coolant Temperature", "°C")
     assert s._attr_device_class == SensorDeviceClass.TEMPERATURE
 
 
 def test_sensor_voltage_device_class(coordinator):
     """V maps to SensorDeviceClass.VOLTAGE."""
     from homeassistant.components.sensor import SensorDeviceClass
-    reading = {"pid": "Battery Voltage", "value": 14.2, "unit": "V"}
-    s = CanteraSensor(coordinator, reading)
+    s = CanteraSensor(coordinator, "Control module voltage", "V")
     assert s._attr_device_class == SensorDeviceClass.VOLTAGE
 
 
@@ -115,21 +109,69 @@ def test_handle_reading_matching_pid(sensor):
 
 
 def test_handle_reading_non_matching_pid(sensor):
-    """_handle_reading ignores non-matching PID."""
+    """_handle_reading ignores non-matching PID; value stays None."""
     sensor._handle_reading({"pid": "Vehicle Speed", "value": 60.0, "unit": "km/h"})
-    assert sensor._attr_native_value == 2400.0  # unchanged
+    assert sensor._attr_native_value is None  # unchanged from initial None
     sensor.async_write_ha_state.assert_not_called()
 
 
 # ---------- async_setup_entry ----------
 
-async def test_async_setup_entry_registers_listener(hass, mock_entry, coordinator):
-    """async_setup_entry registers a reading listener on the coordinator."""
+async def test_async_setup_entry_creates_all_pid_sensors(hass, mock_entry, coordinator):
+    """async_setup_entry pre-creates sensors for all Mode 01 and Mode 09 PIDs."""
     hass.data[DOMAIN] = {mock_entry.entry_id: coordinator}
-    add_entities = MagicMock()
-    listener_count_before = len(coordinator._listeners)
+    added: list = []
+    add_entities = MagicMock(side_effect=lambda entities: added.extend(entities))
     await async_setup_entry(hass, mock_entry, add_entities)
-    assert len(coordinator._listeners) == listener_count_before + 1
+
+    expected_count = 1 + len(MODE01_PIDS) + len(MODE09_PIDS)  # sync + mode01 + mode09
+    assert len(added) == expected_count
+
+
+async def test_async_setup_entry_no_dynamic_listener(hass, mock_entry, coordinator):
+    """async_setup_entry does not register a reading listener itself.
+
+    Per-sensor reading listeners are registered in async_added_to_hass, not here.
+    """
+    hass.data[DOMAIN] = {mock_entry.entry_id: coordinator}
+    listener_count_before = len(coordinator._listeners)
+    await async_setup_entry(hass, mock_entry, MagicMock())
+    assert len(coordinator._listeners) == listener_count_before
+
+
+async def test_async_setup_entry_pid_sensors_have_none_initial_value(hass, mock_entry, coordinator):
+    """All pre-created PID sensors start with native_value None."""
+    hass.data[DOMAIN] = {mock_entry.entry_id: coordinator}
+    added: list = []
+    add_entities = MagicMock(side_effect=lambda entities: added.extend(entities))
+    await async_setup_entry(hass, mock_entry, add_entities)
+
+    pid_sensors = [e for e in added if isinstance(e, CanteraSensor)]
+    assert all(s._attr_native_value is None for s in pid_sensors)
+
+
+async def test_async_setup_entry_includes_mode01_pids(hass, mock_entry, coordinator):
+    """Every Mode 01 PID name appears in the pre-created sensor list."""
+    hass.data[DOMAIN] = {mock_entry.entry_id: coordinator}
+    added: list = []
+    add_entities = MagicMock(side_effect=lambda entities: added.extend(entities))
+    await async_setup_entry(hass, mock_entry, add_entities)
+
+    sensor_names = {e._attr_name for e in added if isinstance(e, CanteraSensor)}
+    for name, _ in MODE01_PIDS:
+        assert name in sensor_names, f"Missing Mode 01 sensor: {name}"
+
+
+async def test_async_setup_entry_includes_mode09_pids(hass, mock_entry, coordinator):
+    """Every Mode 09 PID name appears in the pre-created sensor list."""
+    hass.data[DOMAIN] = {mock_entry.entry_id: coordinator}
+    added: list = []
+    add_entities = MagicMock(side_effect=lambda entities: added.extend(entities))
+    await async_setup_entry(hass, mock_entry, add_entities)
+
+    sensor_names = {e._attr_name for e in added if isinstance(e, CanteraSensor)}
+    for name, _ in MODE09_PIDS:
+        assert name in sensor_names, f"Missing Mode 09 sensor: {name}"
 
 
 # ---------- CanteraSyncStatusSensor unit tests ----------
@@ -215,3 +257,4 @@ async def test_async_setup_entry_adds_sync_status_sensor(hass, mock_entry, coord
     await async_setup_entry(hass, mock_entry, add_entities)
     sync_sensors = [e for e in added if isinstance(e, CanteraSyncStatusSensor)]
     assert len(sync_sensors) == 1
+
