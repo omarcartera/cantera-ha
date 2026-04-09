@@ -26,7 +26,7 @@ def test_coordinator_init(coordinator):
     """Coordinator initialises with correct defaults."""
     assert coordinator._host == "192.168.1.100"
     assert coordinator._port == 8088
-    assert coordinator._listeners == []
+    assert len(coordinator._reading_listeners) == 0
     assert coordinator._sse_task is None
     assert coordinator._api_reachable is False
     assert coordinator._consecutive_health_failures == 0
@@ -36,23 +36,23 @@ def test_coordinator_init(coordinator):
 # ---------- SSE reading listeners ----------
 
 def test_add_reading_listener(coordinator):
-    """add_reading_listener stores callback."""
+    """add_reading_listener stores callback under the given slug."""
     cb = MagicMock()
-    coordinator.add_reading_listener(cb)
-    assert cb in coordinator._listeners
+    coordinator.add_reading_listener("engine_rpm", cb)
+    assert cb in coordinator._reading_listeners["engine_rpm"]
 
 
 def test_remove_reading_listener(coordinator):
-    """remove_reading_listener removes callback."""
+    """remove_reading_listener removes callback from the slug bucket."""
     cb = MagicMock()
-    coordinator.add_reading_listener(cb)
-    coordinator.remove_reading_listener(cb)
-    assert cb not in coordinator._listeners
+    coordinator.add_reading_listener("engine_rpm", cb)
+    coordinator.remove_reading_listener("engine_rpm", cb)
+    assert cb not in coordinator._reading_listeners["engine_rpm"]
 
 
 def test_remove_reading_listener_missing_is_safe(coordinator):
     """Removing a callback that was never added doesn't raise."""
-    coordinator.remove_reading_listener(MagicMock())
+    coordinator.remove_reading_listener("engine_rpm", MagicMock())
 
 
 # ---------- Health listeners ----------
@@ -191,14 +191,23 @@ async def test_poll_health_resets_failures_on_success(coordinator):
 # ---------- Connection state ----------
 
 def test_reading_listener_called(coordinator):
-    """Callbacks in _listeners are called when a reading arrives."""
+    """Callbacks are called only for the slug they registered with."""
     cb = MagicMock()
-    coordinator.add_reading_listener(cb)
+    coordinator.add_reading_listener("engine_rpm", cb)
     reading = {"pid": "engine_rpm", "value": 2400.0, "unit": "rpm"}
-    coordinator._pid_units[reading["pid"]] = reading.get("unit", "")
-    for listener in coordinator._listeners:
+    for listener in coordinator._reading_listeners["engine_rpm"]:
         listener(reading)
     cb.assert_called_once_with(reading)
+
+
+def test_reading_listener_not_called_for_other_slug(coordinator):
+    """Callbacks are NOT called for readings with a different slug."""
+    cb = MagicMock()
+    coordinator.add_reading_listener("engine_rpm", cb)
+    # Simulate dispatch for a different slug
+    for listener in coordinator._reading_listeners.get("vehicle_speed", []):
+        listener({})
+    cb.assert_not_called()
 
 
 # ---------- _backfill_history ----------

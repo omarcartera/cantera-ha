@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from collections import defaultdict
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
@@ -48,7 +49,7 @@ class CanteraCoordinator:
         self._host: str = config_entry.data[CONF_HOST]
         self._port: int = config_entry.data[CONF_PORT]
         self._base_url = f"http://{self._host}:{self._port}"
-        self._listeners: list[Callable[[dict], None]] = []
+        self._reading_listeners: dict[str, list[Callable[[dict], None]]] = defaultdict(list)
         self._sse_task: asyncio.Task | None = None
         self._pid_units: dict[str, str] = {}
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
@@ -100,14 +101,14 @@ class CanteraCoordinator:
                 except Exception:
                     _LOGGER.exception("Connection listener %r raised an exception", cb)
 
-    def add_reading_listener(self, cb: Callable[[dict], None]) -> None:
-        """Register a callback invoked for each live SSE reading."""
-        self._listeners.append(cb)
+    def add_reading_listener(self, slug: str, cb: Callable[[dict], None]) -> None:
+        """Register a callback invoked when a reading for ``slug`` arrives."""
+        self._reading_listeners[slug].append(cb)
 
-    def remove_reading_listener(self, cb: Callable[[dict], None]) -> None:
-        """Remove a previously registered reading callback."""
+    def remove_reading_listener(self, slug: str, cb: Callable[[dict], None]) -> None:
+        """Remove a previously registered reading callback for ``slug``."""
         with contextlib.suppress(ValueError):
-            self._listeners.remove(cb)
+            self._reading_listeners[slug].remove(cb)
 
     # ------------------------------------------------------------------
     # Public API — Health polling
@@ -298,10 +299,10 @@ class CanteraCoordinator:
                         if event_type == SSE_EVENT_TYPE_OBD:
                             try:
                                 reading = json.loads(data_str)
-                                self._pid_units[reading["pid"]] = reading.get(
-                                    "unit", ""
-                                )
-                                for cb in list(self._listeners):
+                                pid = reading["pid"]
+                                self._pid_units[pid] = reading.get("unit", "")
+                                slug = pid.lower().replace(" ", "_")
+                                for cb in list(self._reading_listeners.get(slug, [])):
                                     try:
                                         cb(reading)
                                     except Exception:

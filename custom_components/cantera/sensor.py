@@ -127,11 +127,12 @@ class CanteraSensor(RestoreSensor):
 
         self._slug = slug
         self._restored = False
+        self._available_cache: bool | None = None
 
     async def async_added_to_hass(self) -> None:
         """Register callbacks and restore state when added to HA."""
         await super().async_added_to_hass()
-        self._coordinator.add_reading_listener(self._handle_reading)
+        self._coordinator.add_reading_listener(self._slug, self._handle_reading)
         self._coordinator.add_health_listener(self._handle_health_update)
         if (last_data := await self.async_get_last_sensor_data()) is not None:
             self._attr_native_value = last_data.native_value
@@ -143,7 +144,7 @@ class CanteraSensor(RestoreSensor):
 
     async def async_will_remove_from_hass(self) -> None:
         """Unregister callbacks when entity is removed from HA."""
-        self._coordinator.remove_reading_listener(self._handle_reading)
+        self._coordinator.remove_reading_listener(self._slug, self._handle_reading)
         self._coordinator.remove_health_listener(self._handle_health_update)
 
     @property
@@ -169,17 +170,18 @@ class CanteraSensor(RestoreSensor):
 
     @callback
     def _handle_reading(self, reading: dict) -> None:
-        """Update value when a matching reading arrives."""
-        pid_slug = reading.get("pid", "").lower().replace(" ", "_")
-        if pid_slug == self._slug:
-            self._restored = False
-            self._attr_native_value = reading.get("value")
-            self.async_write_ha_state()
+        """Update value when a reading for this sensor's PID arrives."""
+        self._restored = False
+        self._attr_native_value = reading.get("value")
+        self.async_write_ha_state()
 
     @callback
     def _handle_health_update(self, _health_data: dict) -> None:
         """Re-evaluate availability whenever the health state changes."""
-        self.async_write_ha_state()
+        new_available = self.available
+        if new_available != self._available_cache:
+            self._available_cache = new_available
+            self.async_write_ha_state()
 
 
 # ---------------------------------------------------------------------------

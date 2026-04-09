@@ -152,18 +152,18 @@ def test_sensor_voltage_device_class(coordinator):
     assert s._attr_device_class == SensorDeviceClass.VOLTAGE
 
 
-def test_handle_reading_matching_pid(sensor):
-    """_handle_reading updates value for matching PID slug."""
+def test_handle_reading_updates_value(sensor):
+    """_handle_reading always updates the sensor value (slug dispatch is at coordinator)."""
     sensor._handle_reading({"pid": "Engine RPM", "value": 3000.0, "unit": "rpm"})
     assert sensor._attr_native_value == 3000.0
     sensor.async_write_ha_state.assert_called_once()
 
 
-def test_handle_reading_non_matching_pid(sensor):
-    """_handle_reading ignores non-matching PID; value stays None."""
-    sensor._handle_reading({"pid": "Vehicle Speed", "value": 60.0, "unit": "km/h"})
-    assert sensor._attr_native_value is None  # unchanged from initial None
-    sensor.async_write_ha_state.assert_not_called()
+def test_handle_reading_clears_restored_flag(sensor):
+    """_handle_reading resets _restored so live data takes over availability."""
+    sensor._restored = True
+    sensor._handle_reading({"pid": "Engine RPM", "value": 1500.0})
+    assert sensor._restored is False
 
 
 # ---------- async_setup_entry ----------
@@ -185,9 +185,10 @@ async def test_async_setup_entry_no_dynamic_listener(hass, mock_entry, coordinat
     Per-sensor reading listeners are registered in async_added_to_hass, not here.
     """
     mock_entry.runtime_data = coordinator
-    listener_count_before = len(coordinator._listeners)
+    total_before = sum(len(v) for v in coordinator._reading_listeners.values())
     await async_setup_entry(hass, mock_entry, MagicMock())
-    assert len(coordinator._listeners) == listener_count_before
+    total_after = sum(len(v) for v in coordinator._reading_listeners.values())
+    assert total_after == total_before
 
 
 async def test_async_setup_entry_pid_sensors_have_none_initial_value(hass, mock_entry, coordinator):
@@ -381,7 +382,20 @@ def test_sensor_unavailable_during_syncing(sensor, coordinator):
 
 
 def test_sensor_health_update_triggers_write(sensor):
-    """_handle_health_update calls async_write_ha_state to refresh availability."""
+    """_handle_health_update calls async_write_ha_state when availability changes."""
     sensor._handle_health_update({"can_connected": True})
+    # First call: cache was None, now True (startup grace) → write triggered
     sensor.async_write_ha_state.assert_called_once()
+
+
+def test_sensor_health_update_no_write_when_unchanged(sensor, coordinator):
+    """_handle_health_update skips write when availability has not changed."""
+    coordinator._first_health_received = True  # Exit grace period
+    coordinator._api_reachable = False  # api_offline → unavailable
+    # Prime the cache
+    sensor._handle_health_update({})
+    sensor.async_write_ha_state.reset_mock()
+    # Call again with same availability → no extra write
+    sensor._handle_health_update({})
+    sensor.async_write_ha_state.assert_not_called()
 
