@@ -80,7 +80,10 @@ async def async_setup_entry(
 ) -> None:
     """Set up the CANtera update entity for this config entry."""
     entity = CanteraUpdateEntity(hass, entry.entry_id)
-    async_add_entities([entity])
+    # update_before_add=True forces an immediate GitHub poll so the entity
+    # shows the correct version on first load instead of "Unknown" for the
+    # first hour of the polling interval.
+    async_add_entities([entity], update_before_add=True)
 
     entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
     if "current_unique_ids" in entry_data and entity.unique_id:

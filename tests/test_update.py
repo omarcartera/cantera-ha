@@ -463,9 +463,32 @@ async def test_async_setup_entry_adds_update_entity(hass):
     entry = MagicMock()
     entry.entry_id = "test_entry"
     added: list = []
-    async_add = MagicMock(side_effect=lambda ents: added.extend(ents))
+    async_add = MagicMock(side_effect=lambda ents, **_kw: added.extend(ents))
 
     await async_setup_entry(hass, entry, async_add)
 
     assert len(added) == 1
     assert isinstance(added[0], CanteraUpdateEntity)
+
+
+async def test_async_setup_entry_uses_update_before_add(hass):
+    """async_setup_entry passes update_before_add=True so entity polls GitHub immediately.
+
+    Without this, the entity shows 'Unknown' for up to the full SCAN_INTERVAL
+    (1 hour) after every HA startup or integration reload.
+    """
+    from custom_components.cantera.update import async_setup_entry
+
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    async_add = MagicMock()
+
+    await async_setup_entry(hass, entry, async_add)
+
+    async_add.assert_called_once()
+    _args, kwargs = async_add.call_args
+    assert kwargs.get("update_before_add") is True, (
+        "update_before_add must be True so the GitHub API is polled on setup, "
+        "not deferred by up to 1 hour"
+    )
+
