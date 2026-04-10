@@ -279,7 +279,7 @@ class CanteraSyncStatusSensor(SensorEntity):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = list(_SYNC_STATUS_ICON)
     _attr_translation_key = "sync_status"
-    _attr_entity_category = EntityCategory.CONFIG
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry | None = None) -> None:
         """Initialise from coordinator."""
@@ -397,7 +397,7 @@ class CanteraPiApiVersionSensor(RestoreSensor):
 
     _attr_has_entity_name = True
     _attr_name = "Pi API Version"
-    _attr_entity_category = EntityCategory.CONFIG
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:api"
     _attr_should_poll = False
 
@@ -451,7 +451,7 @@ class CanteraExpectedApiVersionSensor(SensorEntity):
 
     _attr_has_entity_name = True
     _attr_name = "Expected API Version"
-    _attr_entity_category = EntityCategory.CONFIG
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:api"
     _attr_should_poll = False
     _attr_available = True

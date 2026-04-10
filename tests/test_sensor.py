@@ -264,10 +264,10 @@ def test_sync_sensor_translation_key(sync_sensor):
     assert sync_sensor._attr_translation_key == "sync_status"
 
 
-def test_sync_sensor_entity_category_is_config(sync_sensor):
-    """Data Sync Status belongs in the Configuration section of the device page."""
+def test_sync_sensor_entity_category_is_diagnostic(sync_sensor):
+    """Data Sync Status belongs in the Diagnostics section of the device page."""
     from homeassistant.helpers.entity import EntityCategory
-    assert sync_sensor._attr_entity_category == EntityCategory.CONFIG
+    assert sync_sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
 
 
 def test_sync_status_api_offline_by_default(sync_sensor, coordinator):
@@ -1025,14 +1025,14 @@ def test_pi_api_version_always_available(hass, mock_entry):
     assert s.available is True
 
 
-def test_pi_api_version_entity_category_is_config(hass, mock_entry):
-    """Pi API Version belongs in the Configuration section."""
+def test_pi_api_version_entity_category_is_diagnostic(hass, mock_entry):
+    """Pi API Version belongs in the Diagnostics section."""
     from homeassistant.helpers.entity import EntityCategory
     from custom_components.cantera.sensor import CanteraPiApiVersionSensor
 
     coordinator = CanteraCoordinator(hass, mock_entry)
     s = CanteraPiApiVersionSensor(coordinator, mock_entry)
-    assert s._attr_entity_category == EntityCategory.CONFIG
+    assert s._attr_entity_category == EntityCategory.DIAGNOSTIC
 
 
 async def test_pi_api_version_registers_health_listener(hass, mock_entry):
@@ -1083,14 +1083,14 @@ def test_expected_api_version_static_value(hass, mock_entry):
     assert s.native_value == f"{EXPECTED_API_VERSION_MAJOR}.{MIN_API_VERSION_MINOR}"
 
 
-def test_expected_api_version_entity_category_is_config(hass, mock_entry):
-    """Expected API Version belongs in the Configuration section."""
+def test_expected_api_version_entity_category_is_diagnostic(hass, mock_entry):
+    """Expected API Version belongs in the Diagnostics section."""
     from homeassistant.helpers.entity import EntityCategory
     from custom_components.cantera.sensor import CanteraExpectedApiVersionSensor
 
     coordinator = CanteraCoordinator(hass, mock_entry)
     s = CanteraExpectedApiVersionSensor(coordinator, mock_entry)
-    assert s._attr_entity_category == EntityCategory.CONFIG
+    assert s._attr_entity_category == EntityCategory.DIAGNOSTIC
 
 
 def test_expected_api_version_always_available(hass, mock_entry):
