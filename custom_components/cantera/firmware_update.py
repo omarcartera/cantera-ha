@@ -23,6 +23,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    DEFAULT_PORT,
     DOMAIN,
     FIRMWARE_INSTALL_ENDPOINT,
     FIRMWARE_UPDATE_ENDPOINT,
@@ -102,7 +103,7 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
             return
 
         host = self._entry.data.get("host", "")
-        port = self._entry.data.get("port", 8080)
+        port = self._entry.data.get("port", DEFAULT_PORT)
         url = f"http://{host}:{port}{FIRMWARE_UPDATE_ENDPOINT}"
 
         try:
@@ -126,7 +127,7 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
     ) -> None:
         """Trigger firmware OTA install on the Pi."""
         host = self._entry.data.get("host", "")
-        port = self._entry.data.get("port", 8080)
+        port = self._entry.data.get("port", DEFAULT_PORT)
         install_url = f"http://{host}:{port}{FIRMWARE_INSTALL_ENDPOINT}"
         health_url = f"http://{host}:{port}/api/health"
 

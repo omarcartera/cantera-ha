@@ -29,7 +29,7 @@ def test_aggregate_readings_empty():
 
 
 def test_aggregate_readings_single():
-    readings = [{"pid": "engine_rpm", "timestamp_ms": 0, "value": 2000.0, "unit": "rpm"}]
+    readings = [{"pid": "engine_rpm", "ts": 0, "value": 2000.0, "unit": "rpm"}]
     result = aggregate_readings(readings)
     assert "engine_rpm" in result
     assert len(result["engine_rpm"]) == 1
@@ -42,9 +42,9 @@ def test_aggregate_readings_single():
 def test_aggregate_readings_multiple_same_bucket():
     bucket_ts = BUCKET_S * 10
     readings = [
-        {"pid": "engine_rpm", "timestamp_ms": (bucket_ts + 1) * 1000,
+        {"pid": "engine_rpm", "ts": (bucket_ts + 1) * 1000,
          "value": 1000.0, "unit": "rpm"},
-        {"pid": "engine_rpm", "timestamp_ms": (bucket_ts + 2) * 1000,
+        {"pid": "engine_rpm", "ts": (bucket_ts + 2) * 1000,
          "value": 3000.0, "unit": "rpm"},
     ]
     result = aggregate_readings(readings)
@@ -56,8 +56,8 @@ def test_aggregate_readings_multiple_same_bucket():
 
 def test_aggregate_readings_multiple_pids():
     readings = [
-        {"pid": "engine_rpm", "timestamp_ms": 0, "value": 2000.0, "unit": "rpm"},
-        {"pid": "vehicle_speed", "timestamp_ms": 0, "value": 60.0, "unit": "km/h"},
+        {"pid": "engine_rpm", "ts": 0, "value": 2000.0, "unit": "rpm"},
+        {"pid": "vehicle_speed", "ts": 0, "value": 60.0, "unit": "km/h"},
     ]
     result = aggregate_readings(readings)
     assert "engine_rpm" in result
@@ -69,8 +69,8 @@ def test_aggregate_readings_multiple_buckets():
     b1 = BUCKET_S * 1
     b2 = BUCKET_S * 2
     readings = [
-        {"pid": "rpm", "timestamp_ms": (b1 + 1) * 1000, "value": 1000.0, "unit": "rpm"},
-        {"pid": "rpm", "timestamp_ms": (b2 + 1) * 1000, "value": 2000.0, "unit": "rpm"},
+        {"pid": "rpm", "ts": (b1 + 1) * 1000, "value": 1000.0, "unit": "rpm"},
+        {"pid": "rpm", "ts": (b2 + 1) * 1000, "value": 2000.0, "unit": "rpm"},
     ]
     result = aggregate_readings(readings)
     assert len(result["rpm"]) == 2
@@ -83,8 +83,8 @@ def test_aggregate_readings_sorted_by_bucket():
     b2 = BUCKET_S * 2
     b1 = BUCKET_S * 1
     readings = [
-        {"pid": "rpm", "timestamp_ms": (b2 + 1) * 1000, "value": 200.0, "unit": "rpm"},
-        {"pid": "rpm", "timestamp_ms": (b1 + 1) * 1000, "value": 100.0, "unit": "rpm"},
+        {"pid": "rpm", "ts": (b2 + 1) * 1000, "value": 200.0, "unit": "rpm"},
+        {"pid": "rpm", "ts": (b1 + 1) * 1000, "value": 100.0, "unit": "rpm"},
     ]
     result = aggregate_readings(readings)
     starts = [b["start"] for b in result["rpm"]]
@@ -109,7 +109,7 @@ async def test_import_statistics_calls_add_external_statistics(hass):
     """import_statistics builds correct metadata and passes it to HA."""
 
     readings = [
-        {"pid": "Engine RPM", "timestamp_ms": BUCKET_S * 1000, "value": 2500.0, "unit": "rpm"},
+        {"pid": "Engine RPM", "ts": BUCKET_S * 1000, "value": 2500.0, "unit": "rpm"},
     ]
     pid_units = {"Engine RPM": "rpm"}
 
@@ -132,7 +132,7 @@ async def test_import_statistics_calls_add_external_statistics(hass):
 async def test_import_statistics_no_unit_sets_none(hass):
     """import_statistics sets unit_of_measurement to None when unit is empty string."""
 
-    readings = [{"pid": "custom_pid", "timestamp_ms": BUCKET_S * 1000, "value": 42.0, "unit": ""}]
+    readings = [{"pid": "custom_pid", "ts": BUCKET_S * 1000, "value": 42.0, "unit": ""}]
 
     with patch(
         "custom_components.cantera.ha_statistics.async_add_external_statistics"
@@ -147,7 +147,7 @@ async def test_import_statistics_exception_does_not_crash(hass):
     """Exception in async_add_external_statistics is caught; no crash."""
 
     readings = [
-        {"pid": "Engine RPM", "timestamp_ms": BUCKET_S * 1000, "value": 1000.0, "unit": "rpm"},
+        {"pid": "Engine RPM", "ts": BUCKET_S * 1000, "value": 1000.0, "unit": "rpm"},
     ]
 
     with patch(
@@ -161,8 +161,8 @@ async def test_import_statistics_multiple_pids(hass):
     """import_statistics imports stats for each unique PID."""
 
     readings = [
-        {"pid": "Engine RPM", "timestamp_ms": BUCKET_S * 1000, "value": 2000.0, "unit": "rpm"},
-        {"pid": "Vehicle Speed", "timestamp_ms": BUCKET_S * 1000, "value": 80.0, "unit": "km/h"},
+        {"pid": "Engine RPM", "ts": BUCKET_S * 1000, "value": 2000.0, "unit": "rpm"},
+        {"pid": "Vehicle Speed", "ts": BUCKET_S * 1000, "value": 80.0, "unit": "km/h"},
     ]
     pid_units = {"Engine RPM": "rpm", "Vehicle Speed": "km/h"}
 

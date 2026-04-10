@@ -178,7 +178,8 @@ async def test_async_setup_entry_creates_all_pid_sensors(hass, mock_entry, coord
     await async_setup_entry(hass, mock_entry, add_entities)
 
     expected_count = (
-        1 + 1 + len(MODE01_PIDS) + len(MODE09_PIDS)  # sync + firmware_version + mode01 + mode09
+        # sync_status + firmware_version + pi_api_version + expected_api_version + mode01 + mode09
+        1 + 1 + 1 + 1 + len(MODE01_PIDS) + len(MODE09_PIDS)
     )
     assert len(added) == expected_count
 
@@ -861,3 +862,186 @@ async def test_firmware_version_unregisters_health_listener_on_remove(hass, mock
 
     await s.async_will_remove_from_hass()
     assert s._handle_health_update not in coordinator._health_listeners
+
+
+# ---------------------------------------------------------------------------
+# CanteraPiApiVersionSensor tests
+# ---------------------------------------------------------------------------
+
+
+def test_pi_api_version_initial_value_is_none(hass, mock_entry):
+    """Before any health update the cached API version is None."""
+    from custom_components.cantera.sensor import CanteraPiApiVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraPiApiVersionSensor(coordinator, mock_entry)
+    assert s.native_value is None
+
+
+def test_pi_api_version_updates_on_health_data(hass, mock_entry):
+    """Health update containing api_version updates the sensor value."""
+    from custom_components.cantera.sensor import CanteraPiApiVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraPiApiVersionSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+
+    coordinator._reported_api_version = "1.0"
+    s._handle_health_update({})
+
+    assert s.native_value == "1.0"
+    s.async_write_ha_state.assert_called_once()
+
+
+def test_pi_api_version_persists_when_pi_goes_offline(hass, mock_entry):
+    """Cached API version survives when the Pi goes offline and health_data is cleared."""
+    from custom_components.cantera.sensor import CanteraPiApiVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraPiApiVersionSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+
+    coordinator._reported_api_version = "1.0"
+    s._handle_health_update({})
+    assert s.native_value == "1.0"
+
+    # Pi goes offline — coordinator clears its version.
+    coordinator._reported_api_version = None
+    s._handle_health_update({})
+
+    assert s.native_value == "1.0"
+
+
+async def test_pi_api_version_restores_across_ha_restart(hass, mock_entry):
+    """The sensor restores its persisted API version on HA restart."""
+    from unittest.mock import AsyncMock, patch
+    from custom_components.cantera.sensor import CanteraPiApiVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraPiApiVersionSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+
+    mock_sensor_data = MagicMock()
+    mock_sensor_data.native_value = "1.0"
+
+    with (
+        patch(
+            "homeassistant.components.sensor.RestoreSensor.async_added_to_hass",
+            new_callable=AsyncMock,
+        ),
+        patch.object(s, "async_get_last_sensor_data", new_callable=AsyncMock, return_value=mock_sensor_data),
+    ):
+        await s.async_added_to_hass()
+
+    assert s.native_value == "1.0"
+
+
+def test_pi_api_version_always_available(hass, mock_entry):
+    """Pi API Version is always available regardless of API reachability."""
+    from custom_components.cantera.sensor import CanteraPiApiVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraPiApiVersionSensor(coordinator, mock_entry)
+    coordinator._api_reachable = False
+    assert s.available is True
+
+
+def test_pi_api_version_entity_category_is_config(hass, mock_entry):
+    """Pi API Version belongs in the Configuration section."""
+    from homeassistant.helpers.entity import EntityCategory
+    from custom_components.cantera.sensor import CanteraPiApiVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraPiApiVersionSensor(coordinator, mock_entry)
+    assert s._attr_entity_category == EntityCategory.CONFIG
+
+
+async def test_pi_api_version_registers_health_listener(hass, mock_entry):
+    """async_added_to_hass registers a health listener."""
+    from unittest.mock import AsyncMock, patch
+    from custom_components.cantera.sensor import CanteraPiApiVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraPiApiVersionSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+
+    with (
+        patch(
+            "homeassistant.components.sensor.RestoreSensor.async_added_to_hass",
+            new_callable=AsyncMock,
+        ),
+        patch.object(s, "async_get_last_sensor_data", new_callable=AsyncMock, return_value=None),
+    ):
+        await s.async_added_to_hass()
+
+    assert s._handle_health_update in coordinator._health_listeners
+
+
+async def test_pi_api_version_unregisters_health_listener_on_remove(hass, mock_entry):
+    """async_will_remove_from_hass unregisters the health listener."""
+    from custom_components.cantera.sensor import CanteraPiApiVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraPiApiVersionSensor(coordinator, mock_entry)
+    coordinator._health_listeners.append(s._handle_health_update)
+
+    await s.async_will_remove_from_hass()
+    assert s._handle_health_update not in coordinator._health_listeners
+
+
+# ---------------------------------------------------------------------------
+# CanteraExpectedApiVersionSensor tests
+# ---------------------------------------------------------------------------
+
+
+def test_expected_api_version_static_value(hass, mock_entry):
+    """Expected API Version shows the compile-time constant as a string."""
+    from custom_components.cantera.const import EXPECTED_API_VERSION_MAJOR, MIN_API_VERSION_MINOR
+    from custom_components.cantera.sensor import CanteraExpectedApiVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraExpectedApiVersionSensor(coordinator, mock_entry)
+    assert s.native_value == f"{EXPECTED_API_VERSION_MAJOR}.{MIN_API_VERSION_MINOR}"
+
+
+def test_expected_api_version_entity_category_is_config(hass, mock_entry):
+    """Expected API Version belongs in the Configuration section."""
+    from homeassistant.helpers.entity import EntityCategory
+    from custom_components.cantera.sensor import CanteraExpectedApiVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraExpectedApiVersionSensor(coordinator, mock_entry)
+    assert s._attr_entity_category == EntityCategory.CONFIG
+
+
+def test_expected_api_version_always_available(hass, mock_entry):
+    """Expected API Version is always available."""
+    from custom_components.cantera.sensor import CanteraExpectedApiVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraExpectedApiVersionSensor(coordinator, mock_entry)
+    assert s.available is True
+
+
+# ---------------------------------------------------------------------------
+# Sync status — incompatible state
+# ---------------------------------------------------------------------------
+
+
+def test_sync_status_sensor_shows_incompatible_when_api_incompatible(hass, mock_entry):
+    """CanteraSyncStatusSensor.native_value returns 'incompatible' when coordinator is incompatible."""
+    from custom_components.cantera.const import SYNC_STATUS_INCOMPATIBLE
+    from custom_components.cantera.sensor import CanteraSyncStatusSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    coordinator._api_compatible = False
+    s = CanteraSyncStatusSensor(coordinator, mock_entry)
+    assert s.native_value == SYNC_STATUS_INCOMPATIBLE
+
+
+def test_sync_status_sensor_incompatible_icon(hass, mock_entry):
+    """Incompatible state uses the alert-circle icon."""
+    from custom_components.cantera.sensor import CanteraSyncStatusSensor, _SYNC_STATUS_ICON
+    from custom_components.cantera.const import SYNC_STATUS_INCOMPATIBLE
+
+    assert _SYNC_STATUS_ICON[SYNC_STATUS_INCOMPATIBLE] == "mdi:alert-circle"

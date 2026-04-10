@@ -20,11 +20,14 @@ from .const import (
     DEVICE_MANUFACTURER,
     DEVICE_MODEL,
     DOMAIN,
+    EXPECTED_API_VERSION_MAJOR,
+    MIN_API_VERSION_MINOR,
     MODE01_PIDS,
     MODE09_PIDS,
     SENSOR_API_OFFLINE_GRACE_S,
     SYNC_STATUS_API_OFFLINE,
     SYNC_STATUS_CAR_OFF,
+    SYNC_STATUS_INCOMPATIBLE,
     SYNC_STATUS_LIVE,
     SYNC_STATUS_SYNCING,
     UNIT_DEVICE_CLASS_MAP,
@@ -75,6 +78,8 @@ async def async_setup_entry(
     entities = [
         CanteraSyncStatusSensor(coordinator, entry),
         CanteraFirmwareVersionSensor(coordinator, entry),
+        CanteraPiApiVersionSensor(coordinator, entry),
+        CanteraExpectedApiVersionSensor(coordinator, entry),
         *pid_sensors,
     ]
     async_add_entities(entities)
@@ -240,6 +245,7 @@ class CanteraSensor(RestoreSensor):
 # ---------------------------------------------------------------------------
 
 _SYNC_STATUS_ICON: dict[str, str] = {
+    SYNC_STATUS_INCOMPATIBLE: "mdi:alert-circle",
     SYNC_STATUS_LIVE: "mdi:check-circle",
     SYNC_STATUS_CAR_OFF: "mdi:car-off",
     SYNC_STATUS_SYNCING: "mdi:sync",
@@ -251,6 +257,7 @@ class CanteraSyncStatusSensor(SensorEntity):
     """Sensor reporting the current data-update status of the CANtera integration.
 
     States:
+    - ``incompatible``: Pi API major version does not match the integration.
     - ``live``:        API reachable, CAN connected, reading < 30 s old.
     - ``car_off``:     API reachable but no recent CAN data.
     - ``syncing``:     Connected to API; history backfill is in progress.
@@ -363,4 +370,92 @@ class CanteraFirmwareVersionSensor(RestoreSensor):
         if version is not None:
             self._cached_version = str(version)
         self.async_write_ha_state()
+
+
+# ---------------------------------------------------------------------------
+# API version sensors
+# ---------------------------------------------------------------------------
+
+
+class CanteraPiApiVersionSensor(RestoreSensor):
+    """Shows the API contract version currently reported by the Pi firmware.
+
+    The value is read from ``api_version.major`` and ``api_version.minor`` in
+    the /api/health response and formatted as ``"major.minor"`` (e.g. ``"1.0"``).
+    The last known value persists when the Pi is unreachable so the sensor
+    does not revert to Unknown during outages.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Pi API Version"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:api"
+    _attr_should_poll = False
+
+    def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry) -> None:
+        super().__init__()
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_pi_api_version"
+        self._cached_version: str | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore persisted value and register health listener."""
+        await super().async_added_to_hass()
+        if (last := await self.async_get_last_sensor_data()) is not None:
+            if last.native_value is not None:
+                self._cached_version = str(last.native_value)
+        self._coordinator.add_health_listener(self._handle_health_update)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unregister health listener."""
+        self._coordinator.remove_health_listener(self._handle_health_update)
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return self._coordinator.device_info
+
+    @property
+    def native_value(self) -> str | None:
+        return self._cached_version
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @callback
+    def _handle_health_update(self, _health_data: dict) -> None:
+        """Cache reported api_version from coordinator and push state to HA."""
+        reported = self._coordinator.reported_api_version
+        if reported is not None:
+            self._cached_version = reported
+        self.async_write_ha_state()
+
+
+class CanteraExpectedApiVersionSensor(SensorEntity):
+    """Shows the API contract version this integration was built to consume.
+
+    This is a static sensor whose value is determined at install time by the
+    ``EXPECTED_API_VERSION_MAJOR`` and ``MIN_API_VERSION_MINOR`` constants in
+    ``const.py``.  Comparing this value against ``Pi API Version`` shows
+    immediately whether the two sides are in sync.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Expected API Version"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:api"
+    _attr_should_poll = False
+    _attr_available = True
+
+    def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_expected_api_version"
+        self._attr_native_value = (
+            f"{EXPECTED_API_VERSION_MAJOR}.{MIN_API_VERSION_MINOR}"
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return self._coordinator.device_info
+
 

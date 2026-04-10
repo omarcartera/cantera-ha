@@ -34,8 +34,11 @@ from .const import (
     SYNC_STALE_THRESHOLD_S,
     SYNC_STATUS_API_OFFLINE,
     SYNC_STATUS_CAR_OFF,
+    SYNC_STATUS_INCOMPATIBLE,
     SYNC_STATUS_LIVE,
     SYNC_STATUS_SYNCING,
+    EXPECTED_API_VERSION_MAJOR,
+    MIN_API_VERSION_MINOR,
 )
 from .ha_statistics import import_statistics
 
@@ -87,6 +90,12 @@ class CanteraCoordinator:
         # The car-off debounce is suppressed until we've seen live data so
         # that startup and reconnect windows don't falsely report "live".
         self._was_ever_live: bool = False
+
+        # API contract compatibility state.
+        # None = not yet checked (startup), True = compatible, False = incompatible.
+        self._api_compatible: bool | None = None
+        self._reported_api_version: str | None = None
+        self._api_incompatible_notified: bool = False
 
     # ------------------------------------------------------------------
     # Public API — SSE readings
@@ -155,10 +164,16 @@ class CanteraCoordinator:
         )
 
     @property
+    def reported_api_version(self) -> str | None:
+        """The ``major.minor`` API version string reported by the Pi, or ``None``."""
+        return self._reported_api_version
+
+    @property
     def sync_status(self) -> str:
         """Composite data-update status for the sync-status sensor.
 
         States (in priority order):
+        - ``incompatible``: Pi API major version does not match integration.
         - ``api_offline``: /api/health is unreachable (Pi is down / no network).
         - ``syncing``:     API reachable, history backfill is in progress.
         - ``car_off``:     API reachable, CAN not connected or readings stale,
@@ -167,6 +182,8 @@ class CanteraCoordinator:
         - ``live``:        API reachable, CAN connected, recent reading (<30 s),
                            or still within the car-off debounce window.
         """
+        if self._api_compatible is False:
+            return SYNC_STATUS_INCOMPATIBLE
         if not self._api_reachable:
             return SYNC_STATUS_API_OFFLINE
         if self._backfilling:
@@ -270,6 +287,7 @@ class CanteraCoordinator:
         if self._health_poll_running:
             return
         self._health_poll_running = True
+        _success = False
         try:
             url = f"{self._base_url}{HEALTH_ENDPOINT}"
             try:
@@ -283,9 +301,15 @@ class CanteraCoordinator:
                         self._first_health_received = True
                         self._update_car_off_debounce()
                         self._notify_health_listeners()
-                        return
+                        _success = True
             except Exception:
                 pass
+
+            if _success:
+                # Run compatibility check outside the network error handler so
+                # that notification failures don't affect reachability tracking.
+                await self._verify_api_compatibility(self._health_data)
+                return
 
             self._consecutive_health_failures += 1
             if (
@@ -302,6 +326,84 @@ class CanteraCoordinator:
         finally:
             self._health_poll_running = False
 
+    async def _verify_api_compatibility(self, health_data: dict) -> None:
+        """Check ``api_version`` in health data against the expected major version.
+
+        Updates ``_api_compatible`` and ``_reported_api_version``.  When the
+        major version mismatches, the active SSE task is cancelled and restarted
+        so that ``_sse_loop`` re-evaluates the compatibility gate immediately.
+        Notification failures are logged but do not affect reachability state.
+        """
+        api_ver = health_data.get("api_version")
+
+        if api_ver is None:
+            # Old firmware that predates the api_version field.  Give the
+            # benefit of the doubt and log once so the user knows to upgrade.
+            if self._api_compatible is None:
+                _LOGGER.warning(
+                    "Pi firmware does not report api_version — "
+                    "update Pi firmware to enable contract verification"
+                )
+            self._api_compatible = True
+            return
+
+        major = api_ver.get("major", 0)
+        minor = api_ver.get("minor", 0)
+        self._reported_api_version = f"{major}.{minor}"
+
+        if minor < MIN_API_VERSION_MINOR:
+            _LOGGER.info(
+                "Pi API minor version %s.%s is below integration minimum %s.%s",
+                major,
+                minor,
+                EXPECTED_API_VERSION_MAJOR,
+                MIN_API_VERSION_MINOR,
+            )
+
+        was_compatible = self._api_compatible
+        self._api_compatible = major == EXPECTED_API_VERSION_MAJOR
+
+        if not self._api_compatible:
+            # Cancel the active SSE task so _sse_loop immediately re-evaluates
+            # the compatibility gate instead of continuing to consume events.
+            if self._sse_task is not None and not self._sse_task.done():
+                self._sse_task.cancel()
+                self._sse_task = self._hass.async_create_task(self._sse_loop())
+
+            if not self._api_incompatible_notified:
+                self._api_incompatible_notified = True
+                try:
+                    await self._hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "title": "CANtera API Incompatible",
+                            "message": (
+                                f"The CANtera Pi firmware reports API version "
+                                f"{major}.{minor}, but this integration expects "
+                                f"API version {EXPECTED_API_VERSION_MAJOR}.x. "
+                                "Update both Pi firmware and HA integration to "
+                                "matching versions."
+                            ),
+                            "notification_id": "cantera_api_incompatible",
+                        },
+                    )
+                except Exception:
+                    _LOGGER.exception(
+                        "Failed to create API incompatibility notification"
+                    )
+        elif was_compatible is False:
+            # Major version became compatible again (e.g. firmware rollback).
+            self._api_incompatible_notified = False
+            try:
+                await self._hass.services.async_call(
+                    "persistent_notification",
+                    "dismiss",
+                    {"notification_id": "cantera_api_incompatible"},
+                )
+            except Exception:
+                _LOGGER.debug("Failed to dismiss API incompatibility notification")
+
     # ------------------------------------------------------------------
     # Internal — SSE
     # ------------------------------------------------------------------
@@ -310,6 +412,20 @@ class CanteraCoordinator:
         """Connect to SSE stream, reconnect with exponential backoff on error."""
         delay = SSE_RECONNECT_DELAY_S
         while True:
+            # Block until the first health poll resolves compatibility (startup
+            # guard against the race where SSE starts before health is checked).
+            while self._api_compatible is None:
+                await asyncio.sleep(1)
+
+            # Hard-block when API major version is explicitly incompatible.
+            if self._api_compatible is False:
+                _LOGGER.error(
+                    "SSE stream blocked: Pi API version incompatible with integration"
+                )
+                self._set_connected(False)
+                await asyncio.sleep(30)
+                continue
+
             try:
                 await self._connect_and_stream()
                 # Successful connection — reset backoff.

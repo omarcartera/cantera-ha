@@ -42,7 +42,7 @@ def aggregate_readings(readings: list[dict]) -> dict[str, list[dict]]:
 
     for r in readings:
         pid = r["pid"]
-        bucket = _bucket_start(r["timestamp_ms"])
+        bucket = _bucket_start(r["ts"])
         buckets[pid][bucket].append(r["value"])
 
     result: dict[str, list[dict]] = {}

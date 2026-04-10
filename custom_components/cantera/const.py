@@ -49,6 +49,16 @@ SYNC_STATUS_LIVE = "live"
 SYNC_STATUS_CAR_OFF = "car_off"
 SYNC_STATUS_SYNCING = "syncing"
 SYNC_STATUS_API_OFFLINE = "api_offline"
+SYNC_STATUS_INCOMPATIBLE = "incompatible"
+
+# API contract version this integration was built against.
+# EXPECTED_API_VERSION_MAJOR must match the `api_version.major` field returned
+# by the Pi's /api/health endpoint.  A mismatch blocks the SSE stream and
+# shows SYNC_STATUS_INCOMPATIBLE in the Data Sync Status sensor.
+EXPECTED_API_VERSION_MAJOR = 1
+# Minimum acceptable minor version from the Pi (informational; minor mismatches
+# only produce a log entry, not a hard block).
+MIN_API_VERSION_MINOR = 0
 SYNC_STALE_THRESHOLD_S = 30  # seconds before a reading timestamp is considered stale
 # How long car-off condition must persist before sync_status flips to "car_off".
 # This prevents rapid oscillation when the ECU briefly stops responding between

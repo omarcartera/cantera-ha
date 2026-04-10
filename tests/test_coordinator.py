@@ -393,6 +393,8 @@ async def test_save_last_sync_persists_timestamp(coordinator):
 
 async def test_sse_loop_reconnects_after_exception(coordinator):
     """When _connect_and_stream raises, _connected is set False and the loop retries."""
+    # Must be set so _sse_loop doesn't spin forever on the compatibility guard.
+    coordinator._api_compatible = True
     iterations = 0
 
     async def fake_connect():
@@ -528,6 +530,8 @@ def test_update_car_off_debounce_starts_timer_when_was_ever_live(coordinator):
 
 async def test_sse_loop_resets_backoff_after_successful_connection(coordinator):
     """After _connect_and_stream returns without error, delay resets to initial value."""
+    # Must be set so _sse_loop doesn't spin forever on the compatibility guard.
+    coordinator._api_compatible = True
     connect_calls = 0
 
     async def _fake_connect():
@@ -654,3 +658,91 @@ async def test_backfill_history_client_error_logs_debug_not_warning(coordinator)
         patch.object(coordinator, "_load_last_sync", new_callable=AsyncMock, return_value=0),
     ):
         await coordinator._backfill_history()  # Must not raise
+
+
+# ---------- API compatibility ----------
+
+def test_api_compatible_initial_is_none(coordinator):
+    """_api_compatible is None until the first health poll resolves."""
+    assert coordinator._api_compatible is None
+
+
+def test_reported_api_version_initial_is_none(coordinator):
+    """reported_api_version is None until the Pi reports it."""
+    assert coordinator.reported_api_version is None
+
+
+async def test_verify_api_compatibility_matching_major_sets_compatible(coordinator, hass):
+    """api_version with matching major → _api_compatible True."""
+    from custom_components.cantera.const import EXPECTED_API_VERSION_MAJOR
+
+    hass.services.async_call = AsyncMock()
+    await coordinator._verify_api_compatibility(
+        {"api_version": {"major": EXPECTED_API_VERSION_MAJOR, "minor": 0}}
+    )
+
+    assert coordinator._api_compatible is True
+    assert coordinator.reported_api_version == f"{EXPECTED_API_VERSION_MAJOR}.0"
+
+
+async def test_verify_api_compatibility_wrong_major_sets_incompatible(coordinator, hass):
+    """api_version with mismatching major → _api_compatible False."""
+    from custom_components.cantera.const import EXPECTED_API_VERSION_MAJOR
+
+    hass.services.async_call = AsyncMock()
+    wrong_major = EXPECTED_API_VERSION_MAJOR + 99
+    await coordinator._verify_api_compatibility(
+        {"api_version": {"major": wrong_major, "minor": 0}}
+    )
+
+    assert coordinator._api_compatible is False
+    assert coordinator.reported_api_version == f"{wrong_major}.0"
+
+
+async def test_verify_api_compatibility_missing_field_sets_compatible(coordinator, hass):
+    """Health data without api_version (old firmware) → _api_compatible True."""
+    hass.services.async_call = AsyncMock()
+    await coordinator._verify_api_compatibility({})
+
+    assert coordinator._api_compatible is True
+    assert coordinator.reported_api_version is None
+
+
+async def test_verify_api_compatibility_notifies_once_on_incompatible(coordinator, hass):
+    """Persistent notification is created exactly once for incompatible major version."""
+    from custom_components.cantera.const import EXPECTED_API_VERSION_MAJOR
+
+    hass.services.async_call = AsyncMock()
+    wrong_major = EXPECTED_API_VERSION_MAJOR + 99
+
+    await coordinator._verify_api_compatibility(
+        {"api_version": {"major": wrong_major, "minor": 0}}
+    )
+    await coordinator._verify_api_compatibility(
+        {"api_version": {"major": wrong_major, "minor": 0}}
+    )
+
+    # Notification should be created only once.
+    create_calls = [
+        c for c in hass.services.async_call.call_args_list
+        if c.args[1] == "create"
+    ]
+    assert len(create_calls) == 1
+
+
+def test_sync_status_incompatible_takes_priority(coordinator):
+    """sync_status is 'incompatible' when _api_compatible is False, regardless of other state."""
+    from custom_components.cantera.const import SYNC_STATUS_INCOMPATIBLE
+
+    coordinator._api_compatible = False
+    coordinator._api_reachable = True
+    assert coordinator.sync_status == SYNC_STATUS_INCOMPATIBLE
+
+
+def test_sync_status_not_incompatible_when_compatible(coordinator):
+    """sync_status is NOT 'incompatible' when _api_compatible is True."""
+    from custom_components.cantera.const import SYNC_STATUS_INCOMPATIBLE
+
+    coordinator._api_compatible = True
+    coordinator._api_reachable = False
+    assert coordinator.sync_status != SYNC_STATUS_INCOMPATIBLE
