@@ -8,9 +8,14 @@ the HA UI.
 Installation flow
 -----------------
 1. Download the release zipball from GitHub.
-2. Overwrite the running ``custom_components/cantera/`` directory with the
-   new files (skipping ``__pycache__``).
-3. Reload the config entry so the new code is loaded without a full HA restart.
+2. Atomically replace the running ``custom_components/cantera/`` directory
+   with the new files (skipping ``__pycache__``).
+3. Show a persistent notification asking the user to restart Home Assistant.
+
+A full HA restart is required for Python to reimport the updated modules.
+``config_entries.async_reload()`` is intentionally *not* used because it
+does not reimport Python modules, leaving old bytecode running and the
+integration-panel version stale until the next restart.
 """
 from __future__ import annotations
 
@@ -293,8 +298,22 @@ class CanteraUpdateEntity(UpdateEntity):
             # immediately. The config-entry reload below recreates all entities
             # — no full HA restart is required or triggered.
             self._installed_version = target
-            _LOGGER.info("CANtera integration version %s installed; reloading config entry", target)
-            await self._hass.config_entries.async_reload(self._entry_id)
+            _LOGGER.info(
+                "CANtera integration v%s installed; restart Home Assistant to activate",
+                target,
+            )
+            await self._hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "CANtera Update Installed",
+                    "message": (
+                        f"CANtera has been updated to **v{target}**. "
+                        "Please restart Home Assistant to activate the new code."
+                    ),
+                    "notification_id": "cantera_update_restart_required",
+                },
+            )
 
         except Exception:
             _LOGGER.exception("CANtera update installation failed")

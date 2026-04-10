@@ -321,17 +321,46 @@ async def test_async_install_updates_installed_version(entity):
     assert entity.installed_version == "0.2.0"
 
 
-async def test_async_install_triggers_config_entry_reload(entity):
-    """After successful install, config_entries.async_reload is called (not homeassistant.restart)."""
+async def test_async_install_shows_restart_notification(entity):
+    """After successful install, a persistent_notification is created and the
+    version is embedded in its message. config_entries.async_reload must NOT
+    be called — it does not reimport Python modules and gives a false
+    impression of success."""
     entity._releases = FAKE_RELEASES
 
     with (
         patch.object(entity, "_download_and_install", new_callable=AsyncMock),
         patch.object(entity._hass.config_entries, "async_reload", new_callable=AsyncMock) as mock_reload,
+        patch.object(entity._hass.services, "async_call", new_callable=AsyncMock) as mock_svc,
     ):
         await entity.async_install("0.3.0", False)
 
-    mock_reload.assert_awaited_once_with(entity._entry_id)
+    mock_svc.assert_awaited_once()
+    domain, service, payload = mock_svc.call_args[0]
+    assert domain == "persistent_notification"
+    assert service == "create"
+    assert "0.3.0" in payload["message"]
+    assert payload["notification_id"] == "cantera_update_restart_required"
+    mock_reload.assert_not_awaited()
+
+
+async def test_async_install_does_not_reload_config_entry(entity):
+    """async_install must never call config_entries.async_reload.
+
+    Python modules are not reimported on config-entry reload, so calling it
+    gives a false impression of a successful update while the old bytecode
+    continues to run.
+    """
+    entity._releases = FAKE_RELEASES
+
+    with (
+        patch.object(entity, "_download_and_install", new_callable=AsyncMock),
+        patch.object(entity._hass.config_entries, "async_reload", new_callable=AsyncMock) as mock_reload,
+        patch.object(entity._hass.services, "async_call", new_callable=AsyncMock),
+    ):
+        await entity.async_install("0.3.0", False)
+
+    mock_reload.assert_not_awaited()
 
 
 async def test_async_install_in_progress_set_and_cleared(entity):
@@ -359,7 +388,7 @@ async def test_async_install_unknown_version_does_not_raise(entity):
     with patch.object(entity._hass.services, "async_call", new_callable=AsyncMock) as mock_call:
         await entity.async_install("9.9.9", False)  # must not raise
 
-    # restart must NOT be called for a failed install
+    # notification must NOT be created for a failed install
     mock_call.assert_not_awaited()
     assert entity.in_progress is False
 
@@ -386,7 +415,7 @@ async def test_async_install_download_failure_does_not_raise(entity):
         await entity.async_install("0.3.0", False)  # must not raise
 
     assert entity.in_progress is False
-    # restart should not be called if download failed
+    # notification must NOT be created for a failed install
     mock_call.assert_not_awaited()
 
 

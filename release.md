@@ -85,8 +85,13 @@ git push origin v0.4.0-rc.1
 HACS reads `manifest.json` → `version` from the tagged commit. After a release:
 
 1. Users with the integration installed see a HACS update notification
-2. Clicking **Update** downloads the tagged commit and reloads the integration
-3. No Home Assistant restart required (the integration uses `config_entries.async_reload`)
+2. Clicking **Update** downloads the tagged commit and replaces the files on disk
+3. Home Assistant restart is required — Python modules are not reimported until
+   HA restarts, so a reload alone does not activate the new code
+
+The integration's built-in update entity follows the same approach: it downloads
+and installs the files, then shows a persistent notification asking the user to
+restart Home Assistant.
 
 ---
 
