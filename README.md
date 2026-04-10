@@ -2,7 +2,7 @@
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 [![HA Minimum Version](https://img.shields.io/badge/HA%20minimum-2024.4.0-blue.svg)](https://www.home-assistant.io)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/github/license/omarcartera/cantera-ha?color=green)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org)
 
 > Live vehicle diagnostics in Home Assistant — stream OBD-II PID readings from

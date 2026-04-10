@@ -281,6 +281,15 @@ MODE01_PIDS: list[tuple[str, str | None]] = [
     ("PIDs supported [C1-E0]", None),
 ]
 
+# Mode 01 PIDs that must retain their last-known value when the car is off or
+# the API is offline.  Add PIDs here when their physical property cannot be 0
+# while the engine is stopped (e.g. fuel level does not drain to 0 at key-off).
+PERSISTENT_MODE01_PIDS: frozenset[str] = frozenset(
+    [
+        "Fuel Tank Level Input",
+    ]
+)
+
 MODE09_PIDS: list[tuple[str, str | None]] = [
     ("Supported InfoType PIDs (00-1F)", None),         # 0x00
     ("VIN - Message Count", None),                     # 0x01 (non-CAN only)

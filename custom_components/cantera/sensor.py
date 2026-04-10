@@ -24,6 +24,7 @@ from .const import (
     MIN_API_VERSION_MINOR,
     MODE01_PIDS,
     MODE09_PIDS,
+    PERSISTENT_MODE01_PIDS,
     SENSOR_API_OFFLINE_GRACE_S,
     SYNC_STATUS_API_OFFLINE,
     SYNC_STATUS_CAR_OFF,
@@ -69,7 +70,7 @@ async def async_setup_entry(
     coordinator: CanteraCoordinator = entry.runtime_data
 
     pid_sensors = [
-        CanteraSensor(coordinator, name, unit, entry)
+        CanteraSensor(coordinator, name, unit, entry, is_persistent=(name in PERSISTENT_MODE01_PIDS))
         for name, unit in MODE01_PIDS
     ] + [
         CanteraSensor(coordinator, name, unit, entry, is_diagnostic=True)
@@ -110,6 +111,7 @@ class CanteraSensor(RestoreSensor):
         entry: ConfigEntry | None = None,
         *,
         is_diagnostic: bool = False,
+        is_persistent: bool = False,
     ) -> None:
         """Initialise sensor for the given PID name and unit."""
         super().__init__()
@@ -123,6 +125,7 @@ class CanteraSensor(RestoreSensor):
         self._attr_native_value = None
 
         self._is_diagnostic = is_diagnostic
+        self._is_persistent = is_persistent
         if is_diagnostic:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -204,6 +207,12 @@ class CanteraSensor(RestoreSensor):
             # ECU name, CVN, IUPR…) are always presented as text in HA.
             v = self._attr_native_value
             return str(v) if v is not None else None
+
+        if self._is_persistent:
+            # Slowly-changing physical property (e.g. fuel level) — the value
+            # cannot meaningfully be 0 when the engine is off, so always return
+            # the last-known reading rather than zeroing out.
+            return self._attr_native_value
 
         status = self._coordinator.sync_status
         if status == SYNC_STATUS_CAR_OFF:

@@ -76,6 +76,27 @@ Any code that tests connectivity to the CANtera API MUST use `/api/health` — *
 
 ---
 
+## LAW 5 — API Contract Version Sync
+
+The CANtera API version is declared in the Rust backend (`constants.rs`) and mirrored in this integration (`const.py`). Both sides MUST be updated together when the contract changes.
+
+### When to bump versions
+
+| Change type | What to do |
+|---|---|
+| **Breaking** — field removed, renamed, type changed, endpoint removed | Bump `API_VERSION_MAJOR` in Rust **and** update `EXPECTED_API_VERSION_MAJOR` here |
+| **Additive** — new optional field or new endpoint added | Bump `API_VERSION_MINOR` in Rust **and** update `MIN_API_VERSION_MINOR` if a new minimum is required |
+| **Internal** — implementation change with no contract impact | No version bump needed |
+
+### Files to change together
+
+- **Rust side** (`cantera` repo): `src-tauri/src/api_server/constants.rs` — `API_VERSION_MAJOR` / `API_VERSION_MINOR`
+- **HA side** (this repo): `custom_components/cantera/const.py` — `EXPECTED_API_VERSION_MAJOR` / `MIN_API_VERSION_MINOR`
+
+**Never** bump only one side. A mismatch causes the integration to enter `incompatible` sync state and block the SSE stream for all users until both repos are deployed together.
+
+---
+
 ## Quick Reference
 
 ```bash

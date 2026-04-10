@@ -565,6 +565,85 @@ def test_mode09_is_diagnostic_flag_set(coordinator):
     assert live._is_diagnostic is False
 
 
+# ---------- Persistent sensor (Fuel Tank Level Input) ----------
+
+def test_persistent_sensor_flag_set(coordinator):
+    """CanteraSensor stores _is_persistent correctly."""
+    persistent = CanteraSensor(coordinator, "Fuel Tank Level Input", "%", is_persistent=True)
+    regular = CanteraSensor(coordinator, "Engine RPM", "rpm")
+    assert persistent._is_persistent is True
+    assert regular._is_persistent is False
+
+
+def test_persistent_sensor_persists_value_when_car_off(coordinator):
+    """Persistent sensors retain last-known value when car is off — fuel level cannot be 0."""
+    sensor = CanteraSensor(coordinator, "Fuel Tank Level Input", "%", is_persistent=True)
+    sensor._attr_native_value = 62.0
+    coordinator._api_reachable = True
+    coordinator._car_off_since_mono = time.monotonic() - SYNC_CAR_OFF_DEBOUNCE_S - 1
+    assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
+    assert sensor.native_value == 62.0
+
+
+def test_persistent_sensor_persists_value_when_api_offline(coordinator):
+    """Persistent sensors retain last-known value when API is offline — no grace window."""
+    sensor = CanteraSensor(coordinator, "Fuel Tank Level Input", "%", is_persistent=True)
+    sensor._attr_native_value = 45.5
+    coordinator._api_reachable = False
+    assert coordinator.sync_status == SYNC_STATUS_API_OFFLINE
+    sensor._last_live_at = 0.0  # Never had a live reading
+    assert sensor.native_value == 45.5
+
+
+def test_persistent_sensor_persists_value_api_offline_grace_expired(coordinator):
+    """Persistent sensors ignore the grace window — value is kept even after grace expires."""
+    sensor = CanteraSensor(coordinator, "Fuel Tank Level Input", "%", is_persistent=True)
+    sensor._attr_native_value = 30.0
+    coordinator._api_reachable = False
+    assert coordinator.sync_status == SYNC_STATUS_API_OFFLINE
+    sensor._last_live_at = time.monotonic() - SENSOR_API_OFFLINE_GRACE_S - 100
+    assert sensor.native_value == 30.0
+
+
+def test_persistent_sensor_returns_none_before_first_reading(coordinator):
+    """Persistent sensor returns None (not 0) when no reading has ever arrived."""
+    sensor = CanteraSensor(coordinator, "Fuel Tank Level Input", "%", is_persistent=True)
+    coordinator._api_reachable = True
+    coordinator._car_off_since_mono = time.monotonic() - SYNC_CAR_OFF_DEBOUNCE_S - 1
+    assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
+    assert sensor.native_value is None
+
+
+async def test_async_setup_entry_fuel_tank_is_persistent(hass, mock_entry, coordinator):
+    """async_setup_entry marks Fuel Tank Level Input sensor as persistent."""
+    mock_entry.runtime_data = coordinator
+    added: list = []
+    add_entities = MagicMock(side_effect=lambda entities: added.extend(entities))
+    await async_setup_entry(hass, mock_entry, add_entities)
+
+    fuel_sensors = [
+        e for e in added
+        if isinstance(e, CanteraSensor) and e._attr_name == "Fuel Tank Level Input"
+    ]
+    assert len(fuel_sensors) == 1
+    assert fuel_sensors[0]._is_persistent is True
+
+
+async def test_async_setup_entry_engine_rpm_is_not_persistent(hass, mock_entry, coordinator):
+    """async_setup_entry does NOT mark Engine RPM as persistent (it correctly zeroes on car_off)."""
+    mock_entry.runtime_data = coordinator
+    added: list = []
+    add_entities = MagicMock(side_effect=lambda entities: added.extend(entities))
+    await async_setup_entry(hass, mock_entry, add_entities)
+
+    rpm_sensors = [
+        e for e in added
+        if isinstance(e, CanteraSensor) and e._attr_name == "Engine RPM"
+    ]
+    assert len(rpm_sensors) == 1
+    assert rpm_sensors[0]._is_persistent is False
+
+
 # ---------------------------------------------------------------------------
 # async_setup_entry unique_id registration (line 85)
 # ---------------------------------------------------------------------------
