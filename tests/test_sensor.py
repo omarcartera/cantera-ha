@@ -724,3 +724,134 @@ def test_firmware_version_sensor_device_info(hass, mock_entry):
     s = CanteraFirmwareVersionSensor(coordinator, mock_entry)
     # device_info is a computed property — compare equality, not identity.
     assert s.device_info == coordinator.device_info
+
+
+# ---------------------------------------------------------------------------
+# CanteraFirmwareVersionSensor persistence tests
+# ---------------------------------------------------------------------------
+
+def test_firmware_version_initial_value_is_none(hass, mock_entry):
+    """Before any health update the cached version is None."""
+    from custom_components.cantera.sensor import CanteraFirmwareVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareVersionSensor(coordinator, mock_entry)
+    assert s.native_value is None
+
+
+def test_firmware_version_updates_on_health_data(hass, mock_entry):
+    """Health update with a version string updates native_value."""
+    from custom_components.cantera.sensor import CanteraFirmwareVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareVersionSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+
+    s._handle_health_update({"version": "0.1.0", "can_connected": True})
+    assert s.native_value == "0.1.0"
+    s.async_write_ha_state.assert_called_once()
+
+
+def test_firmware_version_persists_when_api_goes_offline(hass, mock_entry):
+    """When the Pi goes offline and health_data is cleared, the cached version persists.
+
+    This is the core regression: coordinator.health_data becomes {} on API offline,
+    but the sensor must still show the last known version rather than 'Unknown'.
+    """
+    from custom_components.cantera.sensor import CanteraFirmwareVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareVersionSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+
+    # Simulate health arriving while Pi is live.
+    s._handle_health_update({"version": "0.1.0"})
+    assert s.native_value == "0.1.0"
+
+    # Simulate coordinator going offline — health_data cleared, empty dict emitted.
+    coordinator._health_data = {}
+    s._handle_health_update({})
+
+    # Version must still be shown.
+    assert s.native_value == "0.1.0"
+
+
+def test_firmware_version_does_not_clear_on_health_without_version(hass, mock_entry):
+    """A health update dict that lacks a 'version' key must not overwrite the cache."""
+    from custom_components.cantera.sensor import CanteraFirmwareVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareVersionSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+
+    s._handle_health_update({"version": "0.2.0"})
+    s._handle_health_update({"can_connected": False})  # no version key
+    assert s.native_value == "0.2.0"
+
+
+async def test_firmware_version_restores_across_ha_restart(hass, mock_entry):
+    """The sensor restores its persisted version on HA restart even if Pi is offline."""
+    from unittest.mock import AsyncMock, patch
+    from custom_components.cantera.sensor import CanteraFirmwareVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareVersionSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+
+    mock_sensor_data = MagicMock()
+    mock_sensor_data.native_value = "0.3.0"
+
+    with (
+        patch(
+            "homeassistant.components.sensor.RestoreSensor.async_added_to_hass",
+            new_callable=AsyncMock,
+        ),
+        patch.object(s, "async_get_last_sensor_data", new_callable=AsyncMock, return_value=mock_sensor_data),
+    ):
+        await s.async_added_to_hass()
+
+    # Pi is still offline — no health update received yet.
+    assert s.native_value == "0.3.0"
+
+
+def test_firmware_version_always_available(hass, mock_entry):
+    """Pi Firmware Version is always available regardless of API state."""
+    from custom_components.cantera.sensor import CanteraFirmwareVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareVersionSensor(coordinator, mock_entry)
+    coordinator._api_reachable = False
+    assert s.available is True
+
+
+async def test_firmware_version_registers_health_listener(hass, mock_entry):
+    """async_added_to_hass registers a health listener with the coordinator."""
+    from unittest.mock import AsyncMock, patch
+    from custom_components.cantera.sensor import CanteraFirmwareVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareVersionSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+
+    with (
+        patch(
+            "homeassistant.components.sensor.RestoreSensor.async_added_to_hass",
+            new_callable=AsyncMock,
+        ),
+        patch.object(s, "async_get_last_sensor_data", new_callable=AsyncMock, return_value=None),
+    ):
+        await s.async_added_to_hass()
+
+    assert s._handle_health_update in coordinator._health_listeners
+
+
+async def test_firmware_version_unregisters_health_listener_on_remove(hass, mock_entry):
+    """async_will_remove_from_hass removes the health listener."""
+    from custom_components.cantera.sensor import CanteraFirmwareVersionSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareVersionSensor(coordinator, mock_entry)
+    coordinator._health_listeners.append(s._handle_health_update)
+
+    await s.async_will_remove_from_hass()
+    assert s._handle_health_update not in coordinator._health_listeners

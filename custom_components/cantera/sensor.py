@@ -301,13 +301,20 @@ class CanteraSyncStatusSensor(SensorEntity):
 # ---------------------------------------------------------------------------
 
 
-class CanteraFirmwareVersionSensor(SensorEntity):
-    """Shows the version of the currently running Pi firmware."""
+class CanteraFirmwareVersionSensor(RestoreSensor):
+    """Shows the version of the currently running Pi firmware.
+
+    The version is read from the /api/health response and cached locally so it
+    persists across Pi reboots and HA restarts.  When the Pi is unreachable the
+    last known version continues to be displayed rather than reverting to
+    "Unknown".
+    """
 
     _attr_has_entity_name = True
     _attr_name = "Pi Firmware Version"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:chip"
+    _attr_should_poll = False
 
     def __init__(
         self,
@@ -318,6 +325,19 @@ class CanteraFirmwareVersionSensor(SensorEntity):
         self._coordinator = coordinator
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_firmware_version"
+        self._cached_version: str | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore persisted version and register health listener."""
+        await super().async_added_to_hass()
+        if (last := await self.async_get_last_sensor_data()) is not None:
+            if last.native_value is not None:
+                self._cached_version = str(last.native_value)
+        self._coordinator.add_health_listener(self._handle_health_update)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unregister health listener."""
+        self._coordinator.remove_health_listener(self._handle_health_update)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -325,9 +345,21 @@ class CanteraFirmwareVersionSensor(SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        return self._coordinator.health_data.get("version")
+        return self._cached_version
 
     @property
     def available(self) -> bool:
         return True
+
+    @callback
+    def _handle_health_update(self, health_data: dict) -> None:
+        """Cache version from health data and push state to HA.
+
+        Only updates the cache when a version string is present — an empty
+        health_data dict (API offline) must not overwrite the last known version.
+        """
+        version = health_data.get("version")
+        if version is not None:
+            self._cached_version = str(version)
+        self.async_write_ha_state()
 

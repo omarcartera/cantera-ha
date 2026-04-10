@@ -178,9 +178,17 @@ class TestCanteraFirmwareVersionSensor:
         from custom_components.cantera.sensor import CanteraFirmwareVersionSensor
 
         coordinator = _mock_coordinator({"version": "0.3.0"})
+        coordinator.add_health_listener = MagicMock()
+        coordinator.remove_health_listener = MagicMock()
         entry = _mock_entry()
         sensor = CanteraFirmwareVersionSensor(coordinator, entry)
+        sensor.async_write_ha_state = MagicMock()
 
+        # Before a health update the cache is empty.
+        assert sensor.native_value is None
+
+        # Simulate the coordinator notifying the listener with health data.
+        sensor._handle_health_update({"version": "0.3.0"})
         assert sensor.native_value == "0.3.0"
         assert sensor.available is True
 
