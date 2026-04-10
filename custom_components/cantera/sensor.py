@@ -263,6 +263,7 @@ class CanteraSyncStatusSensor(SensorEntity):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = list(_SYNC_STATUS_ICON)
     _attr_translation_key = "sync_status"
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry | None = None) -> None:
         """Initialise from coordinator."""

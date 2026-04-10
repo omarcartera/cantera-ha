@@ -263,6 +263,12 @@ def test_sync_sensor_translation_key(sync_sensor):
     assert sync_sensor._attr_translation_key == "sync_status"
 
 
+def test_sync_sensor_entity_category_is_config(sync_sensor):
+    """Data Sync Status belongs in the Configuration section of the device page."""
+    from homeassistant.helpers.entity import EntityCategory
+    assert sync_sensor._attr_entity_category == EntityCategory.CONFIG
+
+
 def test_sync_status_api_offline_by_default(sync_sensor, coordinator):
     """Without any health data, status is api_offline."""
     assert coordinator.sync_status == SYNC_STATUS_API_OFFLINE
