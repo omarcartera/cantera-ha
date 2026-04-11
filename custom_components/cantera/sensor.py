@@ -482,16 +482,20 @@ _FIRMWARE_UPDATE_STATUS_STATES = [
 ]
 
 
-class CanteraFirmwareUpdateStatusSensor(SensorEntity):
+class CanteraFirmwareUpdateStatusSensor(RestoreSensor):
     """Sensor reporting the firmware update check status of the Pi daemon.
 
+    The Pi is the authoritative source for this status — it is read directly
+    from the ``status`` field of ``GET /api/update``.  The last known value is
+    persisted across HA restarts so the sensor never reverts to ``not_checked``
+    after a reload while the Pi is offline.
+
     States:
-    - ``not_checked``:      No update check has run since the integration started
-                            (or the Pi firmware updater is disabled).
+    - ``not_checked``:      Pi has not run an update check yet.
     - ``checking``:         An update check is currently in progress.
     - ``up_to_date``:       The last check confirmed the installed version is current.
     - ``update_available``: The last check found a newer version available.
-    - ``check_failed``:     The last check could not reach the Pi update endpoint.
+    - ``check_failed``:     The last check could not reach the update server.
     """
 
     _attr_has_entity_name = True
@@ -516,8 +520,12 @@ class CanteraFirmwareUpdateStatusSensor(SensorEntity):
         return self._coordinator.firmware_update_state
 
     async def async_added_to_hass(self) -> None:
-        """Register firmware state listener when added to HA."""
+        """Restore persisted state and register firmware state listener."""
         await super().async_added_to_hass()
+        if (last := await self.async_get_last_sensor_data()) is not None:
+            restored = last.native_value
+            if restored in _FIRMWARE_UPDATE_STATUS_STATES:
+                self._coordinator.set_firmware_update_state(restored)
         self._coordinator.add_firmware_state_listener(self._handle_firmware_state)
 
     async def async_will_remove_from_hass(self) -> None:

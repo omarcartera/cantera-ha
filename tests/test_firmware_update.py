@@ -378,3 +378,155 @@ async def test_async_install_poll_loop_client_error_is_swallowed():
 
     # Should complete cleanly with in_progress cleared
     assert entity._attr_in_progress is False
+
+
+# ---------------------------------------------------------------------------
+# Pi-owned status field tests
+# ---------------------------------------------------------------------------
+
+def _make_mock_session(get_resp):
+    """Return a patched aiohttp.ClientSession that returns get_resp for GET."""
+    mock_session = MagicMock()
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_session.get.return_value.__aenter__ = AsyncMock(return_value=get_resp)
+    mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+    return mock_session
+
+
+@pytest.mark.asyncio
+async def test_async_update_uses_pi_status_field_up_to_date():
+    """Pi response with status='up_to_date' sets coordinator state directly."""
+    coordinator = _mock_coordinator()
+    coordinator.set_firmware_update_state = MagicMock()
+    entity = CanteraFirmwareUpdateEntity(coordinator, _mock_entry())
+
+    resp = AsyncMock()
+    resp.status = 200
+    resp.json = AsyncMock(return_value={
+        "current_version": "0.3.0",
+        "latest_version": None,
+        "update_available": False,
+        "status": "up_to_date",
+        "last_checked_utc": "2026-04-11T09:00:00Z",
+    })
+
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session(resp)):
+        await entity.async_update()
+
+    coordinator.set_firmware_update_state.assert_called_with("up_to_date")
+
+
+@pytest.mark.asyncio
+async def test_async_update_uses_pi_status_field_update_available():
+    """Pi response with status='update_available' sets coordinator state directly."""
+    coordinator = _mock_coordinator()
+    coordinator.set_firmware_update_state = MagicMock()
+    entity = CanteraFirmwareUpdateEntity(coordinator, _mock_entry())
+
+    resp = AsyncMock()
+    resp.status = 200
+    resp.json = AsyncMock(return_value={
+        "current_version": "0.3.0",
+        "latest_version": "0.3.1",
+        "update_available": True,
+        "status": "update_available",
+        "last_checked_utc": "2026-04-11T09:00:00Z",
+    })
+
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session(resp)):
+        await entity.async_update()
+
+    coordinator.set_firmware_update_state.assert_called_with("update_available")
+
+
+@pytest.mark.asyncio
+async def test_async_update_uses_pi_status_field_not_checked():
+    """Pi in Idle state (status='not_checked') sets coordinator state directly."""
+    coordinator = _mock_coordinator()
+    coordinator.set_firmware_update_state = MagicMock()
+    entity = CanteraFirmwareUpdateEntity(coordinator, _mock_entry())
+
+    resp = AsyncMock()
+    resp.status = 200
+    resp.json = AsyncMock(return_value={
+        "current_version": "0.3.0",
+        "latest_version": None,
+        "update_available": False,
+        "status": "not_checked",
+        "last_checked_utc": None,
+    })
+
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session(resp)):
+        await entity.async_update()
+
+    coordinator.set_firmware_update_state.assert_called_with("not_checked")
+
+
+@pytest.mark.asyncio
+async def test_async_update_fallback_when_status_field_absent():
+    """Old Pi firmware without 'status' field falls back to boolean logic."""
+    coordinator = _mock_coordinator()
+    coordinator.set_firmware_update_state = MagicMock()
+    entity = CanteraFirmwareUpdateEntity(coordinator, _mock_entry())
+
+    resp = AsyncMock()
+    resp.status = 200
+    resp.json = AsyncMock(return_value={
+        "current_version": "0.3.0",
+        "latest_version": "0.3.1",
+        "update_available": True,
+        # No "status" field — old firmware
+        "last_checked_utc": "2026-04-11T09:00:00Z",
+    })
+
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session(resp)):
+        await entity.async_update()
+
+    coordinator.set_firmware_update_state.assert_called_with("update_available")
+
+
+@pytest.mark.asyncio
+async def test_async_update_fallback_no_status_no_check():
+    """Old Pi firmware without 'status' and last_checked_utc=None → 'not_checked'."""
+    coordinator = _mock_coordinator()
+    coordinator.set_firmware_update_state = MagicMock()
+    entity = CanteraFirmwareUpdateEntity(coordinator, _mock_entry())
+
+    resp = AsyncMock()
+    resp.status = 200
+    resp.json = AsyncMock(return_value={
+        "current_version": "0.3.0",
+        "latest_version": None,
+        "update_available": False,
+        "last_checked_utc": None,
+    })
+
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session(resp)):
+        await entity.async_update()
+
+    coordinator.set_firmware_update_state.assert_called_with("not_checked")
+
+
+@pytest.mark.asyncio
+async def test_async_update_sets_checking_then_final_state():
+    """async_update sets 'checking' first, then the Pi's status."""
+    coordinator = _mock_coordinator()
+    calls = []
+    coordinator.set_firmware_update_state = MagicMock(side_effect=calls.append)
+    entity = CanteraFirmwareUpdateEntity(coordinator, _mock_entry())
+
+    resp = AsyncMock()
+    resp.status = 200
+    resp.json = AsyncMock(return_value={
+        "current_version": "0.3.0",
+        "latest_version": None,
+        "update_available": False,
+        "status": "up_to_date",
+        "last_checked_utc": "2026-04-11T09:00:00Z",
+    })
+
+    with patch("aiohttp.ClientSession", return_value=_make_mock_session(resp)):
+        await entity.async_update()
+
+    assert calls == ["checking", "up_to_date"]

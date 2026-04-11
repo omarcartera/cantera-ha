@@ -119,11 +119,21 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
                     self._latest_version = data.get("latest_version")
                     self._release_notes = data.get("release_notes")
                     self._release_url = data.get("release_url")
-                    installed = self._coordinator.health_data.get("version")
-                    if self._latest_version and self._latest_version != installed:
-                        self._coordinator.set_firmware_update_state("update_available")
+                    # Pi is authoritative — read its status field directly.
+                    pi_status = data.get("status")
+                    if pi_status in (
+                        "not_checked", "checking", "up_to_date",
+                        "update_available", "check_failed",
+                    ):
+                        self._coordinator.set_firmware_update_state(pi_status)
                     else:
-                        self._coordinator.set_firmware_update_state("up_to_date")
+                        # Unknown / future status value — fall back to boolean.
+                        if data.get("update_available"):
+                            self._coordinator.set_firmware_update_state("update_available")
+                        elif data.get("last_checked_utc") is not None:
+                            self._coordinator.set_firmware_update_state("up_to_date")
+                        else:
+                            self._coordinator.set_firmware_update_state("not_checked")
                 elif resp.status == 503:
                     _LOGGER.debug("Firmware updater disabled on Pi")
                     self._coordinator.set_firmware_update_state("not_checked")

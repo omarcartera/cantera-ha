@@ -1221,3 +1221,45 @@ def test_firmware_update_status_write_ha_state_called_on_update(hass, mock_entry
 
     s.async_write_ha_state.assert_called_once()
     assert s.native_value == "update_available"
+
+
+async def test_firmware_update_status_restores_last_known_value(hass, mock_entry):
+    """Sensor restores persisted state on HA restart instead of reverting to not_checked."""
+    from unittest.mock import AsyncMock as _AsyncMock
+    from custom_components.cantera.sensor import CanteraFirmwareUpdateStatusSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareUpdateStatusSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+    s.hass = hass
+
+    # Simulate HA restore data with a previously persisted state.
+    mock_sensor_data = MagicMock()
+    mock_sensor_data.native_value = "update_available"
+    s.async_get_last_sensor_data = _AsyncMock(return_value=mock_sensor_data)
+
+    await s.async_added_to_hass()
+
+    # Coordinator state should be seeded with the restored value.
+    assert coordinator.firmware_update_state == "update_available"
+    assert s.native_value == "update_available"
+
+
+async def test_firmware_update_status_ignores_invalid_restored_value(hass, mock_entry):
+    """Sensor ignores a persisted value that is not in the valid options list."""
+    from unittest.mock import AsyncMock as _AsyncMock
+    from custom_components.cantera.sensor import CanteraFirmwareUpdateStatusSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareUpdateStatusSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+    s.hass = hass
+
+    mock_sensor_data = MagicMock()
+    mock_sensor_data.native_value = "some_unknown_state_from_future_version"
+    s.async_get_last_sensor_data = _AsyncMock(return_value=mock_sensor_data)
+
+    await s.async_added_to_hass()
+
+    # Invalid value must not be loaded — coordinator stays at default.
+    assert coordinator.firmware_update_state == "not_checked"
