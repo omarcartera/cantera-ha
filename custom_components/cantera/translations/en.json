@@ -36,6 +36,15 @@
           "syncing": "Syncing",
           "api_offline": "API offline"
         }
+      },
+      "firmware_update_status": {
+        "state": {
+          "not_checked": "Not checked",
+          "checking": "Checking",
+          "up_to_date": "Up to date",
+          "update_available": "Update available",
+          "check_failed": "Check failed"
+        }
       }
     }
   }

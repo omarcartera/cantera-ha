@@ -178,8 +178,8 @@ async def test_async_setup_entry_creates_all_pid_sensors(hass, mock_entry, coord
     await async_setup_entry(hass, mock_entry, add_entities)
 
     expected_count = (
-        # sync_status + firmware_version + pi_api_version + expected_api_version + mode01 + mode09
-        1 + 1 + 1 + 1 + len(MODE01_PIDS) + len(MODE09_PIDS)
+        # sync_status + firmware_version + firmware_update_status + pi_api_version + expected_api_version + mode01 + mode09
+        1 + 1 + 1 + 1 + 1 + len(MODE01_PIDS) + len(MODE09_PIDS)
     )
     assert len(added) == expected_count
 
@@ -1124,3 +1124,100 @@ def test_sync_status_sensor_incompatible_icon(hass, mock_entry):
     from custom_components.cantera.const import SYNC_STATUS_INCOMPATIBLE
 
     assert _SYNC_STATUS_ICON[SYNC_STATUS_INCOMPATIBLE] == "mdi:alert-circle"
+
+
+# ---------------------------------------------------------------------------
+# CanteraFirmwareUpdateStatusSensor tests
+# ---------------------------------------------------------------------------
+
+def test_firmware_update_status_initial_state(hass, mock_entry):
+    """Sensor starts in 'not_checked' state."""
+    from custom_components.cantera.sensor import CanteraFirmwareUpdateStatusSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareUpdateStatusSensor(coordinator, mock_entry)
+    assert s.native_value == "not_checked"
+
+
+def test_firmware_update_status_entity_category_is_diagnostic(hass, mock_entry):
+    """Sensor is in the DIAGNOSTIC entity category."""
+    from custom_components.cantera.sensor import CanteraFirmwareUpdateStatusSensor
+    from homeassistant.const import EntityCategory
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareUpdateStatusSensor(coordinator, mock_entry)
+    assert s.entity_category == EntityCategory.DIAGNOSTIC
+
+
+def test_firmware_update_status_options_are_complete(hass, mock_entry):
+    """Sensor options list contains all five expected states."""
+    from custom_components.cantera.sensor import (
+        CanteraFirmwareUpdateStatusSensor,
+        _FIRMWARE_UPDATE_STATUS_STATES,
+    )
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareUpdateStatusSensor(coordinator, mock_entry)
+    assert set(s.options) == set(_FIRMWARE_UPDATE_STATUS_STATES)
+    assert "not_checked" in s.options
+    assert "checking" in s.options
+    assert "up_to_date" in s.options
+    assert "update_available" in s.options
+    assert "check_failed" in s.options
+
+
+def test_firmware_update_status_reflects_coordinator_state(hass, mock_entry):
+    """native_value tracks coordinator.firmware_update_state."""
+    from custom_components.cantera.sensor import CanteraFirmwareUpdateStatusSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareUpdateStatusSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+
+    for state in ("checking", "up_to_date", "update_available", "check_failed", "not_checked"):
+        coordinator.set_firmware_update_state(state)
+        assert s.native_value == state
+
+
+async def test_firmware_update_status_registers_listener(hass, mock_entry):
+    """Sensor registers a firmware state listener on async_added_to_hass."""
+    from custom_components.cantera.sensor import CanteraFirmwareUpdateStatusSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareUpdateStatusSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+    s.hass = hass
+
+    assert len(coordinator._firmware_state_listeners) == 0
+    await s.async_added_to_hass()
+    assert len(coordinator._firmware_state_listeners) == 1
+
+
+async def test_firmware_update_status_unregisters_listener_on_remove(hass, mock_entry):
+    """Sensor removes its listener on async_will_remove_from_hass."""
+    from custom_components.cantera.sensor import CanteraFirmwareUpdateStatusSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareUpdateStatusSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+    s.hass = hass
+
+    await s.async_added_to_hass()
+    assert len(coordinator._firmware_state_listeners) == 1
+    await s.async_will_remove_from_hass()
+    assert len(coordinator._firmware_state_listeners) == 0
+
+
+def test_firmware_update_status_write_ha_state_called_on_update(hass, mock_entry):
+    """Sensor calls async_write_ha_state when firmware state changes."""
+    from custom_components.cantera.sensor import CanteraFirmwareUpdateStatusSensor
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    s = CanteraFirmwareUpdateStatusSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+
+    coordinator._firmware_state_listeners.append(s._handle_firmware_state)
+    coordinator.set_firmware_update_state("update_available")
+
+    s.async_write_ha_state.assert_called_once()
+    assert s.native_value == "update_available"

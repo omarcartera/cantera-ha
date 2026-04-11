@@ -98,6 +98,10 @@ class CanteraCoordinator:
         self._reported_api_version: str | None = None
         self._api_incompatible_notified: bool = False
 
+        # Firmware update check state (set by firmware_update.py after each poll).
+        self._firmware_update_state: str = "not_checked"
+        self._firmware_state_listeners: list[Callable[[str], None]] = []
+
     # ------------------------------------------------------------------
     # Public API — SSE readings
     # ------------------------------------------------------------------
@@ -214,6 +218,37 @@ class CanteraCoordinator:
                 cb(self._health_data)
             except Exception:
                 _LOGGER.exception("Health listener %r raised an exception", cb)
+
+    # ------------------------------------------------------------------
+    # Firmware update state
+    # ------------------------------------------------------------------
+
+    @property
+    def firmware_update_state(self) -> str:
+        """Return the current firmware update check state.
+
+        Possible values: ``not_checked``, ``checking``, ``up_to_date``,
+        ``update_available``, ``check_failed``.
+        """
+        return self._firmware_update_state
+
+    def set_firmware_update_state(self, state: str) -> None:
+        """Update firmware check state and notify registered listeners."""
+        self._firmware_update_state = state
+        for cb in list(self._firmware_state_listeners):
+            try:
+                cb(state)
+            except Exception:
+                _LOGGER.exception("Firmware state listener %r raised an exception", cb)
+
+    def add_firmware_state_listener(self, cb: Callable[[str], None]) -> None:
+        """Register a callback invoked when firmware update state changes."""
+        self._firmware_state_listeners.append(cb)
+
+    def remove_firmware_state_listener(self, cb: Callable[[str], None]) -> None:
+        """Remove a firmware state change callback."""
+        with contextlib.suppress(ValueError):
+            self._firmware_state_listeners.remove(cb)
 
     def _update_car_off_debounce(self) -> None:
         """Update the car-off debounce timer from the latest health data.

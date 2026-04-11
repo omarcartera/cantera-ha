@@ -79,6 +79,7 @@ async def async_setup_entry(
     entities = [
         CanteraSyncStatusSensor(coordinator, entry),
         CanteraFirmwareVersionSensor(coordinator, entry),
+        CanteraFirmwareUpdateStatusSensor(coordinator, entry),
         CanteraPiApiVersionSensor(coordinator, entry),
         CanteraExpectedApiVersionSensor(coordinator, entry),
         *pid_sensors,
@@ -466,5 +467,66 @@ class CanteraExpectedApiVersionSensor(SensorEntity):
     @property
     def device_info(self) -> DeviceInfo:
         return self._coordinator.device_info
+
+
+# ---------------------------------------------------------------------------
+# Firmware update status sensor
+# ---------------------------------------------------------------------------
+
+_FIRMWARE_UPDATE_STATUS_STATES = [
+    "not_checked",
+    "checking",
+    "up_to_date",
+    "update_available",
+    "check_failed",
+]
+
+
+class CanteraFirmwareUpdateStatusSensor(SensorEntity):
+    """Sensor reporting the firmware update check status of the Pi daemon.
+
+    States:
+    - ``not_checked``:      No update check has run since the integration started
+                            (or the Pi firmware updater is disabled).
+    - ``checking``:         An update check is currently in progress.
+    - ``up_to_date``:       The last check confirmed the installed version is current.
+    - ``update_available``: The last check found a newer version available.
+    - ``check_failed``:     The last check could not reach the Pi update endpoint.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Firmware Update Status"
+    _attr_should_poll = False
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = _FIRMWARE_UPDATE_STATUS_STATES
+    _attr_translation_key = "firmware_update_status"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:update"
+
+    def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_firmware_update_status"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return self._coordinator.device_info
+
+    @property
+    def native_value(self) -> str:
+        return self._coordinator.firmware_update_state
+
+    async def async_added_to_hass(self) -> None:
+        """Register firmware state listener when added to HA."""
+        await super().async_added_to_hass()
+        self._coordinator.add_firmware_state_listener(self._handle_firmware_state)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unregister firmware state listener."""
+        self._coordinator.remove_firmware_state_listener(self._handle_firmware_state)
+
+    @callback
+    def _handle_firmware_state(self, _state: str) -> None:
+        """Refresh HA state whenever the firmware check state changes."""
+        self.async_write_ha_state()
 
 

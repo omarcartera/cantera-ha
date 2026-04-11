@@ -106,6 +106,8 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
         port = self._entry.data.get("port", DEFAULT_PORT)
         url = f"http://{host}:{port}{FIRMWARE_UPDATE_ENDPOINT}"
 
+        self._coordinator.set_firmware_update_state("checking")
+
         try:
             _timeout = aiohttp.ClientTimeout(total=10)
             async with (
@@ -117,10 +119,19 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
                     self._latest_version = data.get("latest_version")
                     self._release_notes = data.get("release_notes")
                     self._release_url = data.get("release_url")
+                    installed = self._coordinator.health_data.get("version")
+                    if self._latest_version and self._latest_version != installed:
+                        self._coordinator.set_firmware_update_state("update_available")
+                    else:
+                        self._coordinator.set_firmware_update_state("up_to_date")
                 elif resp.status == 503:
                     _LOGGER.debug("Firmware updater disabled on Pi")
+                    self._coordinator.set_firmware_update_state("not_checked")
+                else:
+                    self._coordinator.set_firmware_update_state("check_failed")
         except (TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.debug("Firmware update check failed: %s", err)
+            self._coordinator.set_firmware_update_state("check_failed")
 
     async def async_install(
         self, version: str | None, backup: bool, **kwargs: Any
