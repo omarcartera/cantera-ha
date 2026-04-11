@@ -30,6 +30,13 @@ HEALTH_FAIL_THRESHOLD = 2  # consecutive failures before marking unreachable
 # SSE behaviour
 SSE_RECONNECT_DELAY_S = 5
 SSE_EVENT_TYPE_OBD = "obd_reading"
+# Read timeout for the SSE connection.  The Pi firmware sends an SSE keepalive
+# comment every 15 s, so 45 s (3×) gives comfortable headroom for normal
+# quiet periods while still detecting a power-killed Pi within one keepalive
+# period after the timeout fires.  Set to None only with Pi firmware >= 0.54
+# that ships the keepalive; older firmware will not produce any bytes when the
+# vehicle CAN bus is silent and a timeout would cause spurious reconnects.
+SSE_READ_TIMEOUT_S = 45
 
 # Statistics behaviour
 HISTORY_BUCKET_MINUTES = 5  # HA statistics minimum bucket size

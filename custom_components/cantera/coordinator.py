@@ -29,6 +29,7 @@ from .const import (
     HISTORY_ENDPOINT,
     SSE_ENDPOINT,
     SSE_EVENT_TYPE_OBD,
+    SSE_READ_TIMEOUT_S,
     SSE_RECONNECT_DELAY_S,
     SYNC_CAR_OFF_DEBOUNCE_S,
     SYNC_STALE_THRESHOLD_S,
@@ -452,9 +453,15 @@ class CanteraCoordinator:
 
         A guard prevents a second backfill from starting if one is already
         running from a previous (quickly-lost) connection attempt.
+
+        ``sock_read=SSE_READ_TIMEOUT_S`` detects dead TCP connections that
+        arise when the Pi is power-killed (e.g. car cuts power) without a
+        clean TCP FIN.  The Pi firmware sends an SSE keepalive comment every
+        15 s, so the 45 s timeout fires only when the stream has been truly
+        silent for three keepalive periods — well beyond any normal quiet gap.
         """
         url = f"{self._base_url}{SSE_ENDPOINT}"
-        timeout = aiohttp.ClientTimeout(connect=10, sock_read=None)
+        timeout = aiohttp.ClientTimeout(connect=10, sock_read=SSE_READ_TIMEOUT_S)
 
         # Launch backfill concurrently, but only if not already in flight.
         if self._backfill_task is None or self._backfill_task.done():
