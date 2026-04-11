@@ -28,6 +28,7 @@ from .const import (
     HEALTH_POLL_INTERVAL_S,
     HISTORY_ENDPOINT,
     SSE_ENDPOINT,
+    SSE_EVENT_TYPE_BUS_STATS,
     SSE_EVENT_TYPE_OBD,
     SSE_READ_TIMEOUT_S,
     SSE_RECONNECT_DELAY_S,
@@ -101,6 +102,9 @@ class CanteraCoordinator:
         # Firmware update check state (set by firmware_update.py after each poll).
         self._firmware_update_state: str = "not_checked"
         self._firmware_state_listeners: list[Callable[[str], None]] = []
+
+        # Bus statistics listeners — notified via SSE 'bus_stats' events.
+        self._bus_stats_listeners: list[Callable[[dict], None]] = []
 
     # ------------------------------------------------------------------
     # Public API — SSE readings
@@ -249,6 +253,22 @@ class CanteraCoordinator:
         """Remove a firmware state change callback."""
         with contextlib.suppress(ValueError):
             self._firmware_state_listeners.remove(cb)
+
+    def add_bus_stats_listener(self, cb: Callable[[dict], None]) -> None:
+        """Register a callback invoked on each SSE 'bus_stats' event."""
+        self._bus_stats_listeners.append(cb)
+
+    def remove_bus_stats_listener(self, cb: Callable[[dict], None]) -> None:
+        """Remove a bus stats callback."""
+        with contextlib.suppress(ValueError):
+            self._bus_stats_listeners.remove(cb)
+
+    def _notify_bus_stats_listeners(self, stats: dict) -> None:
+        for cb in list(self._bus_stats_listeners):
+            try:
+                cb(stats)
+            except Exception:
+                _LOGGER.exception("Bus stats listener %r raised an exception", cb)
 
     def _update_car_off_debounce(self) -> None:
         """Update the car-off debounce timer from the latest health data.
@@ -532,6 +552,12 @@ class CanteraCoordinator:
                                         )
                             except (json.JSONDecodeError, KeyError):
                                 _LOGGER.debug("Malformed SSE data: %s", data_str)
+                        elif event_type == SSE_EVENT_TYPE_BUS_STATS:
+                            try:
+                                stats = json.loads(data_str)
+                                self._notify_bus_stats_listeners(stats)
+                            except json.JSONDecodeError:
+                                _LOGGER.debug("Malformed bus_stats SSE data: %s", data_str)
                     elif text == "":
                         event_type = None
 

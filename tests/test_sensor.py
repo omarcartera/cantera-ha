@@ -25,6 +25,7 @@ from custom_components.cantera.coordinator import CanteraCoordinator
 from custom_components.cantera.sensor import (
     CanteraSensor,
     CanteraSyncStatusSensor,
+    CanteraBusLoadSensor,
     async_setup_entry,
 )
 
@@ -178,8 +179,8 @@ async def test_async_setup_entry_creates_all_pid_sensors(hass, mock_entry, coord
     await async_setup_entry(hass, mock_entry, add_entities)
 
     expected_count = (
-        # sync_status + firmware_version + firmware_update_status + pi_api_version + expected_api_version + mode01 + mode09
-        1 + 1 + 1 + 1 + 1 + len(MODE01_PIDS) + len(MODE09_PIDS)
+        # sync_status + firmware_version + firmware_update_status + pi_api_version + expected_api_version + bus_load + mode01 + mode09
+        1 + 1 + 1 + 1 + 1 + 1 + len(MODE01_PIDS) + len(MODE09_PIDS)
     )
     assert len(added) == expected_count
 
@@ -1263,3 +1264,87 @@ async def test_firmware_update_status_ignores_invalid_restored_value(hass, mock_
 
     # Invalid value must not be loaded — coordinator stays at default.
     assert coordinator.firmware_update_state == "not_checked"
+
+
+# ---------- CanteraBusLoadSensor unit tests ----------
+
+@pytest.fixture
+def bus_load_sensor(coordinator, mock_entry):
+    s = CanteraBusLoadSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+    return s
+
+
+def test_bus_load_initial_value_is_none(bus_load_sensor):
+    """Sensor starts with None before any health/SSE data arrives."""
+    assert bus_load_sensor.native_value is None
+
+
+def test_bus_load_unique_id(bus_load_sensor):
+    assert bus_load_sensor._attr_unique_id == "test_entry_id_can_bus_load"
+
+
+def test_bus_load_updates_from_health_poll(bus_load_sensor):
+    """Health listener populates bus_load_pct and estimated flag."""
+    bus_load_sensor._handle_health_update({"bus_load_pct": 12.5, "bus_load_estimated": True})
+    assert bus_load_sensor.native_value == 12.5
+    assert bus_load_sensor.extra_state_attributes == {"estimated": True}
+    bus_load_sensor.async_write_ha_state.assert_called()
+
+
+def test_bus_load_hardware_api_not_estimated(bus_load_sensor):
+    """Hardware API source has estimated=False."""
+    bus_load_sensor._handle_health_update({"bus_load_pct": 5.0, "bus_load_estimated": False})
+    assert bus_load_sensor.native_value == 5.0
+    assert bus_load_sensor.extra_state_attributes == {"estimated": False}
+
+
+def test_bus_load_health_with_null_pct_ignored(bus_load_sensor):
+    """Health update with null bus_load_pct does not overwrite prior value."""
+    bus_load_sensor._handle_health_update({"bus_load_pct": 20.0, "bus_load_estimated": False})
+    bus_load_sensor._handle_health_update({"bus_load_pct": None})
+    assert bus_load_sensor.native_value == 20.0
+
+
+def test_bus_load_missing_key_in_old_firmware(bus_load_sensor):
+    """Health data without bus_load_pct (old firmware) leaves sensor at None."""
+    bus_load_sensor._handle_health_update({"can_connected": True})
+    assert bus_load_sensor.native_value is None
+    assert bus_load_sensor.extra_state_attributes == {}
+
+
+def test_bus_load_updates_from_sse_bus_stats(bus_load_sensor):
+    """SSE bus_stats event updates the sensor value."""
+    bus_load_sensor._handle_bus_stats({"bus_load_pct": 33.3, "estimated": True})
+    assert bus_load_sensor.native_value == 33.3
+    assert bus_load_sensor.extra_state_attributes == {"estimated": True}
+    bus_load_sensor.async_write_ha_state.assert_called()
+
+
+def test_bus_load_sse_without_pct_ignored(bus_load_sensor):
+    """SSE bus_stats without bus_load_pct does not overwrite prior value."""
+    bus_load_sensor._handle_bus_stats({"bus_load_pct": 10.0, "estimated": False})
+    bus_load_sensor._handle_bus_stats({"some_other_key": 1})
+    assert bus_load_sensor.native_value == 10.0
+
+
+def test_bus_load_no_estimated_flag(bus_load_sensor):
+    """When estimated flag absent, extra_state_attributes contains no estimated key."""
+    bus_load_sensor._handle_health_update({"bus_load_pct": 7.0})
+    assert "estimated" not in bus_load_sensor.extra_state_attributes
+
+
+def test_bus_load_listener_registered_in_coordinator(coordinator, mock_entry):
+    """async_added_to_hass registers both health and bus_stats listeners."""
+    s = CanteraBusLoadSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+    before_health = len(coordinator._health_listeners)
+    before_bus = len(coordinator._bus_stats_listeners)
+    coordinator.add_health_listener(s._handle_health_update)
+    coordinator.add_bus_stats_listener(s._handle_bus_stats)
+    assert len(coordinator._health_listeners) == before_health + 1
+    assert len(coordinator._bus_stats_listeners) == before_bus + 1
+    coordinator.remove_health_listener(s._handle_health_update)
+    coordinator.remove_bus_stats_listener(s._handle_bus_stats)
+    assert len(coordinator._health_listeners) == before_health
+    assert len(coordinator._bus_stats_listeners) == before_bus

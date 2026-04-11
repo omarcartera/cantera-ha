@@ -82,6 +82,7 @@ async def async_setup_entry(
         CanteraFirmwareUpdateStatusSensor(coordinator, entry),
         CanteraPiApiVersionSensor(coordinator, entry),
         CanteraExpectedApiVersionSensor(coordinator, entry),
+        CanteraBusLoadSensor(coordinator, entry),
         *pid_sensors,
     ]
     async_add_entities(entities)
@@ -538,3 +539,68 @@ class CanteraFirmwareUpdateStatusSensor(RestoreSensor):
         self.async_write_ha_state()
 
 
+class CanteraBusLoadSensor(SensorEntity):
+    """Sensor reporting CAN bus load percentage.
+
+    Updated at ~1 Hz via the SSE 'bus_stats' event, with fallback to the
+    5-second /api/health poll.  When the bus load is derived from a software
+    estimator (e.g. SLCAN/CANable), the ``estimated`` extra state attribute is
+    ``True``.  When sourced from hardware (e.g. Kvaser), it is ``False``.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "CAN Bus Load"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
+    _attr_icon = "mdi:gauge"
+    _attr_should_poll = False
+
+    def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_can_bus_load"
+        self._bus_load_pct: float | None = None
+        self._bus_load_estimated: bool | None = None
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return self._coordinator.device_info
+
+    @property
+    def native_value(self) -> float | None:
+        return self._bus_load_pct
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        if self._bus_load_estimated is None:
+            return {}
+        return {"estimated": self._bus_load_estimated}
+
+    async def async_added_to_hass(self) -> None:
+        """Register listeners for both health polls and SSE bus_stats events."""
+        await super().async_added_to_hass()
+        self._coordinator.add_health_listener(self._handle_health_update)
+        self._coordinator.add_bus_stats_listener(self._handle_bus_stats)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unregister listeners."""
+        self._coordinator.remove_health_listener(self._handle_health_update)
+        self._coordinator.remove_bus_stats_listener(self._handle_bus_stats)
+
+    @callback
+    def _handle_health_update(self, health_data: dict) -> None:
+        pct = health_data.get("bus_load_pct")
+        estimated = health_data.get("bus_load_estimated")
+        if pct is not None:
+            self._bus_load_pct = float(pct)
+            self._bus_load_estimated = bool(estimated) if estimated is not None else None
+            self.async_write_ha_state()
+
+    @callback
+    def _handle_bus_stats(self, stats: dict) -> None:
+        pct = stats.get("bus_load_pct")
+        estimated = stats.get("estimated")
+        if pct is not None:
+            self._bus_load_pct = float(pct)
+            self._bus_load_estimated = bool(estimated) if estimated is not None else None
+            self.async_write_ha_state()
