@@ -356,6 +356,11 @@ class CanteraCoordinator:
                             self._api_reachable = True
                         self._first_health_received = True
                         self._update_car_off_debounce()
+                        # Propagate firmware update status on every health poll
+                        # (every 5 s) rather than waiting for the hourly scan.
+                        fw_status = self._health_data.get("firmware_update_status")
+                        if fw_status is not None:
+                            self.set_firmware_update_state(fw_status)
                         self._notify_health_listeners()
                         _success = True
             except Exception:

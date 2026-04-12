@@ -66,7 +66,7 @@ SYNC_STATUS_INCOMPATIBLE = "incompatible"
 EXPECTED_API_VERSION_MAJOR = 1
 # Minimum acceptable minor version from the Pi (informational; minor mismatches
 # only produce a log entry, not a hard block).
-MIN_API_VERSION_MINOR = 1
+MIN_API_VERSION_MINOR = 2
 SYNC_STALE_THRESHOLD_S = 30  # seconds before a reading timestamp is considered stale
 # How long car-off condition must persist before sync_status flips to "car_off".
 # This prevents rapid oscillation when the ECU briefly stops responding between
