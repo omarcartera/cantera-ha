@@ -192,6 +192,11 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
                         v = data.get("version")
                         if v is not None and v != old_version:
                             new_version = v
+                            # Patch coordinator health immediately so that
+                            # installed_version reflects the change right now
+                            # rather than waiting for the next health poll.
+                            self._coordinator._health_data["version"] = v
+                            self._coordinator._notify_health_listeners()
                             _LOGGER.info(
                                 "CANtera Pi firmware updated: %s → %s",
                                 old_version,
@@ -202,6 +207,10 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
                 pass  # Pi may be restarting; keep polling
 
         self._attr_in_progress = False
+        # Refresh latest_version from the Pi so the update card flips to
+        # "up to date" immediately instead of waiting for the hourly poll.
+        if new_version:
+            await self.async_update()
         self.async_write_ha_state()
 
         if new_version:

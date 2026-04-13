@@ -387,6 +387,51 @@ async def test_async_install_poll_loop_client_error_is_swallowed():
     assert entity._attr_in_progress is False
 
 
+@pytest.mark.asyncio
+async def test_async_install_updates_coordinator_health_immediately():
+    """When version change is detected, coordinator health data is patched instantly
+    so installed_version reflects the new version without waiting for the next poll."""
+    coordinator = _mock_coordinator({"version": "0.3.0"})
+    # Use a real dict so we can assert the update happened.
+    coordinator._health_data = {"version": "0.3.0"}
+    coordinator._notify_health_listeners = MagicMock()
+    entity = CanteraFirmwareUpdateEntity(coordinator, _mock_entry())
+    entity.async_write_ha_state = MagicMock()
+    entity.hass = MagicMock()
+
+    post_resp = AsyncMock()
+    post_resp.status = 202
+
+    health_resp = AsyncMock()
+    health_resp.status = 200
+    health_resp.json = AsyncMock(return_value={"version": "0.3.1"})
+
+    with patch("aiohttp.ClientSession") as mock_session_cls:
+        mock_session = MagicMock()
+        mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_session.post.return_value.__aenter__ = AsyncMock(return_value=post_resp)
+        mock_session.post.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_session.get.return_value.__aenter__ = AsyncMock(return_value=health_resp)
+        mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        # Two time() calls: set deadline (0), enter loop (0 < 300 → True),
+        # version changes → break before third call.
+        with patch("asyncio.get_running_loop") as mock_loop:
+            loop = MagicMock()
+            mock_loop.return_value = loop
+            loop.time.side_effect = [0, 0]
+
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                with patch.object(entity, "async_update", new_callable=AsyncMock):
+                    await entity.async_install(version=None, backup=False)
+
+    # Coordinator health data updated immediately, not waiting for next poll.
+    assert coordinator._health_data["version"] == "0.3.1"
+    coordinator._notify_health_listeners.assert_called()
+    assert entity._attr_in_progress is False
+
+
 # ---------------------------------------------------------------------------
 # Pi-owned status field tests
 # ---------------------------------------------------------------------------
