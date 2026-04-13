@@ -407,7 +407,7 @@ async def test_sse_loop_reconnects_after_exception(coordinator):
 
     with (
         patch.object(coordinator, "_connect_and_stream", side_effect=fake_connect),
-        patch("asyncio.sleep", new_callable=AsyncMock),
+        patch.object(coordinator, "_sse_backoff_sleep", new_callable=AsyncMock),
     ):
         await coordinator._sse_loop()
 
@@ -542,10 +542,59 @@ async def test_sse_loop_resets_backoff_after_successful_connection(coordinator):
         # First call returns normally — simulates successful SSE stream.
 
     coordinator._connect_and_stream = _fake_connect
-    with patch("asyncio.sleep", new_callable=AsyncMock):
+    with patch.object(coordinator, "_sse_backoff_sleep", new_callable=AsyncMock):
         await coordinator._sse_loop()
 
     assert connect_calls == 2
+
+
+async def test_sse_wake_event_set_when_pi_becomes_reachable(hass, mock_entry):
+    """When health poll transitions _api_reachable False→True, _sse_wake is set."""
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    assert not coordinator._sse_wake.is_set()
+
+    resp = AsyncMock()
+    resp.status = 200
+    resp.json = AsyncMock(return_value={
+        "api_version": "2.0",
+        "obd_state": "live",
+        "version": "0.3.0",
+    })
+
+    with patch("custom_components.cantera.coordinator.async_get_clientsession") as mock_session_fn:
+        mock_session = MagicMock()
+        mock_session_fn.return_value = mock_session
+        mock_session.get.return_value.__aenter__ = AsyncMock(return_value=resp)
+        mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+        with patch.object(coordinator, "_verify_api_compatibility", new_callable=AsyncMock):
+            await coordinator._poll_health()
+
+    assert coordinator._sse_wake.is_set(), "_sse_wake must be set on unreachable→reachable"
+
+
+async def test_sse_wake_event_not_set_when_already_reachable(hass, mock_entry):
+    """_sse_wake is NOT set on a routine healthy poll (already reachable)."""
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    coordinator._api_reachable = True  # already reachable
+    coordinator._sse_wake.clear()
+
+    resp = AsyncMock()
+    resp.status = 200
+    resp.json = AsyncMock(return_value={
+        "api_version": "2.0",
+        "obd_state": "live",
+        "version": "0.3.0",
+    })
+
+    with patch("custom_components.cantera.coordinator.async_get_clientsession") as mock_session_fn:
+        mock_session = MagicMock()
+        mock_session_fn.return_value = mock_session
+        mock_session.get.return_value.__aenter__ = AsyncMock(return_value=resp)
+        mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+        with patch.object(coordinator, "_verify_api_compatibility", new_callable=AsyncMock):
+            await coordinator._poll_health()
+
+    assert not coordinator._sse_wake.is_set(), "_sse_wake must NOT be set on a routine poll"
 
 
 # ---------- _connect_and_stream (lines 351-378) ----------

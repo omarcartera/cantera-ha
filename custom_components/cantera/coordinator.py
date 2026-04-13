@@ -30,6 +30,7 @@ from .const import (
     SSE_ENDPOINT,
     SSE_EVENT_TYPE_BUS_STATS,
     SSE_EVENT_TYPE_OBD,
+    SSE_MAX_RECONNECT_DELAY_S,
     SSE_READ_TIMEOUT_S,
     SSE_RECONNECT_DELAY_S,
     SYNC_CAR_OFF_DEBOUNCE_S,
@@ -105,6 +106,12 @@ class CanteraCoordinator:
 
         # Bus statistics listeners — notified via SSE 'bus_stats' events.
         self._bus_stats_listeners: list[Callable[[dict], None]] = []
+
+        # Event set by the health poller whenever the Pi transitions from
+        # unreachable → reachable.  The SSE reconnect sleep awaits this so that
+        # the SSE stream reconnects immediately when the Pi comes back online
+        # rather than waiting out the full exponential backoff.
+        self._sse_wake: asyncio.Event = asyncio.Event()
 
     # ------------------------------------------------------------------
     # Public API — SSE readings
@@ -354,6 +361,9 @@ class CanteraCoordinator:
                         self._consecutive_health_failures = 0
                         if not self._api_reachable:
                             self._api_reachable = True
+                            # Wake the SSE loop so it reconnects immediately
+                            # instead of waiting out the current backoff sleep.
+                            self._sse_wake.set()
                         self._first_health_received = True
                         self._update_car_off_debounce()
                         # Propagate firmware update status on every health poll
@@ -501,8 +511,19 @@ class CanteraCoordinator:
                     delay,
                 )
                 self._set_connected(False)
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, 60)
+            await self._sse_backoff_sleep(delay)
+            delay = min(delay * 2, SSE_MAX_RECONNECT_DELAY_S)
+
+    async def _sse_backoff_sleep(self, seconds: float) -> None:
+        """Sleep for up to ``seconds``, waking immediately if the Pi comes back online.
+
+        The health poller sets ``_sse_wake`` when the Pi transitions from
+        unreachable → reachable, which cancels this sleep so the SSE loop
+        reconnects without waiting out the remaining backoff window.
+        """
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(self._sse_wake.wait(), timeout=seconds)
+        self._sse_wake.clear()
 
     async def _connect_and_stream(self) -> None:
         """Start backfill concurrently then stream live SSE data.

@@ -28,7 +28,12 @@ HEALTH_POLL_INTERVAL_S = 5
 HEALTH_FAIL_THRESHOLD = 2  # consecutive failures before marking unreachable
 
 # SSE behaviour
-SSE_RECONNECT_DELAY_S = 5
+# Initial reconnect delay; grows exponentially up to SSE_MAX_RECONNECT_DELAY_S.
+# These are intentionally short because the Pi is a local device — long
+# backoffs would leave HA dark for minutes after a Pi restart.  A health-poll
+# wake event cuts the backoff short the moment the Pi comes back online.
+SSE_RECONNECT_DELAY_S = 3
+SSE_MAX_RECONNECT_DELAY_S = 10
 SSE_EVENT_TYPE_OBD = "obd_reading"
 SSE_EVENT_TYPE_BUS_STATS = "bus_stats"
 # Read timeout for the SSE connection.  The Pi firmware sends an SSE keepalive
