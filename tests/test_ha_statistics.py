@@ -1,5 +1,5 @@
 """Tests for ha_statistics module."""
-from unittest.mock import patch
+from unittest.mock import AsyncMock, call, patch
 
 from homeassistant.components.recorder.models import StatisticMeanType
 
@@ -194,3 +194,52 @@ def test_build_statistic_ids_already_lowercase():
     from custom_components.cantera.const import DOMAIN
     ids = build_statistic_ids(["coolant_temp"])
     assert ids == [f"{DOMAIN}:coolant_temp"]
+
+
+# ---------------------------------------------------------------------------
+# Concurrency / event-loop priority (these guard the asyncio.to_thread and
+# yield-between-PID behaviours added to keep the SSE loop responsive)
+# ---------------------------------------------------------------------------
+
+
+async def test_import_statistics_uses_thread_for_aggregation(hass):
+    """aggregate_readings must run in a thread pool, not on the event loop."""
+    readings = [
+        {"pid": "Engine RPM", "ts": BUCKET_S * 1000, "value": 2000.0, "unit": "rpm"},
+    ]
+    with patch(
+        "custom_components.cantera.ha_statistics.asyncio.to_thread",
+        new_callable=AsyncMock,
+        return_value={"Engine RPM": [{"start": BUCKET_S, "mean": 2000.0, "min": 2000.0, "max": 2000.0}]},
+    ) as mock_thread, patch(
+        "custom_components.cantera.ha_statistics.async_add_external_statistics"
+    ):
+        await import_statistics(hass, readings, {"Engine RPM": "rpm"})
+
+    mock_thread.assert_awaited_once_with(aggregate_readings, readings)
+
+
+async def test_import_statistics_yields_between_pids(hass):
+    """asyncio.sleep(0) must be awaited once per PID to yield to the event loop."""
+    readings = [
+        {"pid": "Engine RPM", "ts": BUCKET_S * 1000, "value": 2000.0, "unit": "rpm"},
+        {"pid": "Vehicle Speed", "ts": BUCKET_S * 1000, "value": 80.0, "unit": "km/h"},
+    ]
+    pid_units = {"Engine RPM": "rpm", "Vehicle Speed": "km/h"}
+
+    sleep_calls: list[float] = []
+
+    async def record_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    with patch(
+        "custom_components.cantera.ha_statistics.asyncio.sleep",
+        side_effect=record_sleep,
+    ), patch(
+        "custom_components.cantera.ha_statistics.async_add_external_statistics"
+    ):
+        await import_statistics(hass, readings, pid_units)
+
+    # One yield per PID
+    assert len(sleep_calls) == 2
+    assert all(d == 0 for d in sleep_calls)

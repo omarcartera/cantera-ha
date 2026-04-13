@@ -1,6 +1,7 @@
 """HA long-term statistics importer for CANtera OBD readings."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING
@@ -68,7 +69,11 @@ async def import_statistics(
     if not readings:
         return
 
-    aggregated = aggregate_readings(readings)
+    # Offload CPU-heavy aggregation to a thread pool worker so the event loop
+    # stays free to process incoming SSE data while we crunch large history
+    # payloads.  This is especially important right after Pi reconnect, when
+    # the SSE loop and backfill run concurrently.
+    aggregated = await asyncio.to_thread(aggregate_readings, readings)
 
     for pid_name, stat_buckets in aggregated.items():
         unit = pid_units.get(pid_name, "")
@@ -99,3 +104,7 @@ async def import_statistics(
             async_add_external_statistics(hass, metadata, statistics)
         except Exception:
             _LOGGER.exception("Failed to import statistics for %s", pid_name)
+
+        # Yield to the event loop between PIDs so SSE and health-poll tasks
+        # are not starved during large backfill imports.
+        await asyncio.sleep(0)
