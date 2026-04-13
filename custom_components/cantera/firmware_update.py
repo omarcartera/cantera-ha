@@ -33,7 +33,7 @@ from .coordinator import CanteraCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(hours=1)
-_INSTALL_POLL_TIMEOUT_S = 120
+_INSTALL_POLL_TIMEOUT_S = 300
 _INSTALL_POLL_INTERVAL_S = 5
 
 
@@ -156,6 +156,11 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
         if version:
             payload["version"] = version
 
+        # Capture the current version BEFORE posting so that a brief health-
+        # data gap during the install does not cause old_version = None and a
+        # spurious early exit from the polling loop.
+        old_version = self.installed_version or self._coordinator.health_data.get("version")
+
         try:
             async with aiohttp.ClientSession() as session, session.post(
                 install_url,
@@ -173,11 +178,10 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
         self._attr_in_progress = True
         self.async_write_ha_state()
 
-        old_version = self.installed_version
-
         # Poll /api/health until version changes or timeout.
-        deadline = asyncio.get_event_loop().time() + _INSTALL_POLL_TIMEOUT_S
-        while asyncio.get_event_loop().time() < deadline:
+        new_version: str | None = None
+        deadline = asyncio.get_running_loop().time() + _INSTALL_POLL_TIMEOUT_S
+        while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(_INSTALL_POLL_INTERVAL_S)
             try:
                 async with aiohttp.ClientSession() as session, session.get(
@@ -185,11 +189,13 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        if data.get("version") != old_version:
+                        v = data.get("version")
+                        if v is not None and v != old_version:
+                            new_version = v
                             _LOGGER.info(
-                                "Firmware updated: %s → %s",
+                                "CANtera Pi firmware updated: %s → %s",
                                 old_version,
-                                data.get("version"),
+                                new_version,
                             )
                             break
             except (TimeoutError, aiohttp.ClientError):
@@ -197,3 +203,19 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
 
         self._attr_in_progress = False
         self.async_write_ha_state()
+
+        if new_version:
+            self.hass.components.persistent_notification.async_create(
+                f"CANtera Pi firmware updated successfully.\n\n"
+                f"**{old_version or 'previous version'} → {new_version}**\n\n"
+                f"The Pi service restarted automatically. All sensors are live.",
+                title="CANtera Pi Updated",
+                notification_id="cantera_firmware_updated",
+            )
+        else:
+            _LOGGER.warning(
+                "CANtera firmware install: version did not change within %ds "
+                "(old=%s). The Pi may still be installing in the background.",
+                _INSTALL_POLL_TIMEOUT_S,
+                old_version,
+            )

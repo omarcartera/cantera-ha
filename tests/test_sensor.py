@@ -1270,6 +1270,10 @@ async def test_firmware_update_status_ignores_invalid_restored_value(hass, mock_
 
 @pytest.fixture
 def bus_load_sensor(coordinator, mock_entry):
+    # Simulate a live coordinator (API reachable, no car-off) so that
+    # native_value returns the actual _bus_load_pct rather than the
+    # sync-status-driven 0.0 fallback.
+    coordinator._api_reachable = True
     s = CanteraBusLoadSensor(coordinator, mock_entry)
     s.async_write_ha_state = MagicMock()
     return s
@@ -1348,3 +1352,31 @@ def test_bus_load_listener_registered_in_coordinator(coordinator, mock_entry):
     coordinator.remove_bus_stats_listener(s._handle_bus_stats)
     assert len(coordinator._health_listeners) == before_health
     assert len(coordinator._bus_stats_listeners) == before_bus
+
+
+def test_bus_load_returns_zero_when_api_offline(coordinator, mock_entry):
+    """native_value is 0.0 when the API is unreachable (default initial state)."""
+    # Default coordinator state: _api_reachable=False → sync_status=api_offline
+    s = CanteraBusLoadSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+    s._bus_load_pct = 25.0  # prior cached reading
+    assert s.native_value == 0.0
+
+
+def test_bus_load_returns_zero_when_car_off(coordinator, mock_entry):
+    """native_value is 0.0 when sync_status is car_off, regardless of cached reading."""
+    import time as _time
+    coordinator._api_reachable = True
+    coordinator._car_off_since_mono = _time.monotonic() - 9999  # well past debounce
+    s = CanteraBusLoadSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+    s._bus_load_pct = 18.0
+    assert s.native_value == 0.0
+
+
+def test_bus_load_write_ha_state_called_even_when_pct_is_none(bus_load_sensor):
+    """_handle_health_update always calls async_write_ha_state so sync_status changes
+    are reflected immediately, even when bus_load_pct is absent in the health data."""
+    bus_load_sensor._handle_health_update({"can_connected": True})
+    bus_load_sensor.async_write_ha_state.assert_called()
+

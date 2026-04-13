@@ -108,6 +108,8 @@ class TestCanteraFirmwareUpdateEntity:
         health_response.status = 200
         health_response.json = AsyncMock(return_value={"version": "0.3.1"})
 
+        entity.hass = MagicMock()
+
         with patch("aiohttp.ClientSession") as mock_session_cls:
             mock_session = MagicMock()
             mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -117,13 +119,15 @@ class TestCanteraFirmwareUpdateEntity:
             mock_session.get.return_value.__aenter__ = AsyncMock(return_value=health_response)
             mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("asyncio.get_event_loop") as mock_loop:
+            with patch("asyncio.get_running_loop") as mock_loop:
                 loop = MagicMock()
                 mock_loop.return_value = loop
-                # Make deadline always hit immediately so we exit after first poll
-                loop.time.side_effect = [0, 200]
+                # Deadline fires before the first poll so the loop exits immediately.
+                # Uses [0, 9999]: first call sets deadline=300, second check 9999>=300 exits.
+                loop.time.side_effect = [0, 9999]
 
-                await entity.async_install(version="0.3.1", backup=False)
+                with patch("asyncio.sleep", new_callable=AsyncMock):
+                    await entity.async_install(version="0.3.1", backup=False)
 
         args, _ = mock_session.post.call_args
         assert FIRMWARE_INSTALL_ENDPOINT in args[0]
@@ -147,6 +151,8 @@ class TestCanteraFirmwareUpdateEntity:
         health_response.status = 200
         health_response.json = AsyncMock(return_value={"version": "0.3.1"})
 
+        entity.hass = MagicMock()
+
         with patch("aiohttp.ClientSession") as mock_session_cls:
             mock_session = MagicMock()
             mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -156,12 +162,13 @@ class TestCanteraFirmwareUpdateEntity:
             mock_session.get.return_value.__aenter__ = AsyncMock(return_value=health_response)
             mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("asyncio.get_event_loop") as mock_loop:
+            with patch("asyncio.get_running_loop") as mock_loop:
                 loop = MagicMock()
                 mock_loop.return_value = loop
-                loop.time.side_effect = [0, 200]
+                loop.time.side_effect = [0, 9999]
 
-                await entity.async_install(version=None, backup=False)
+                with patch("asyncio.sleep", new_callable=AsyncMock):
+                    await entity.async_install(version=None, backup=False)
 
         # First write_ha_state call: in_progress=True; second: in_progress=False
         assert len(in_progress_states) == 2
@@ -367,14 +374,14 @@ async def test_async_install_poll_loop_client_error_is_swallowed():
         )
         mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("asyncio.get_event_loop") as mock_loop:
-            loop = MagicMock()
-            mock_loop.return_value = loop
-            # Deadline expires immediately after first poll attempt
-            loop.time.side_effect = [0, 200]
+        with patch("asyncio.get_running_loop") as mock_loop:
+                loop = MagicMock()
+                mock_loop.return_value = loop
+                # Deadline fires before the first poll so the loop exits immediately.
+                loop.time.side_effect = [0, 9999]
 
-            with patch("asyncio.sleep", new_callable=AsyncMock):
-                await entity.async_install(version=None, backup=False)
+                with patch("asyncio.sleep", new_callable=AsyncMock):
+                    await entity.async_install(version=None, backup=False)
 
     # Should complete cleanly with in_progress cleared
     assert entity._attr_in_progress is False

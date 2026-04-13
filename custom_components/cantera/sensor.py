@@ -568,6 +568,16 @@ class CanteraBusLoadSensor(SensorEntity):
 
     @property
     def native_value(self) -> float | None:
+        """Return bus load, or 0.0 when the car is off or the API is offline.
+
+        Mirrors the behaviour of ``CanteraSensor.native_value``: live data
+        returns the last sample; car_off / api_offline returns 0.0 so the
+        sensor stays available with a meaningful value instead of freezing at
+        the last reading.
+        """
+        status = self._coordinator.sync_status
+        if status in (SYNC_STATUS_CAR_OFF, SYNC_STATUS_API_OFFLINE):
+            return 0.0
         return self._bus_load_pct
 
     @property
@@ -594,7 +604,8 @@ class CanteraBusLoadSensor(SensorEntity):
         if pct is not None:
             self._bus_load_pct = float(pct)
             self._bus_load_estimated = bool(estimated) if estimated is not None else None
-            self.async_write_ha_state()
+        # Always write state so sync_status-driven 0.0 fallback is applied.
+        self.async_write_ha_state()
 
     @callback
     def _handle_bus_stats(self, stats: dict) -> None:
