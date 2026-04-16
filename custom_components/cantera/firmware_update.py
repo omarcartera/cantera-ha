@@ -1,16 +1,14 @@
 """Firmware update entity for CANtera Pi daemon.
 
 Polls GET /api/update to check if a new version of the Pi binary is
-available.  When the user presses Install, POSTs to /api/update/install,
-then polls /api/health until the reported version changes.
+available.  Shown as a non-installable update in Home Assistant — the Pi
+installs updates itself via ``cantera update install`` or the TUI.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import timedelta
-from typing import Any
 
 import aiohttp
 from homeassistant.components.update import (
@@ -25,7 +23,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import (
     DEFAULT_PORT,
     DOMAIN,
-    FIRMWARE_INSTALL_ENDPOINT,
     FIRMWARE_UPDATE_ENDPOINT,
 )
 from .coordinator import CanteraCoordinator
@@ -33,8 +30,6 @@ from .coordinator import CanteraCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(hours=1)
-_INSTALL_POLL_TIMEOUT_S = 300
-_INSTALL_POLL_INTERVAL_S = 5
 
 
 async def async_setup_entry(
@@ -57,7 +52,7 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
 
     _attr_has_entity_name = True
     _attr_name = "Pi Firmware"
-    _attr_supported_features = UpdateEntityFeature.INSTALL | UpdateEntityFeature.RELEASE_NOTES
+    _attr_supported_features = UpdateEntityFeature.RELEASE_NOTES
 
     def __init__(
         self,
@@ -70,7 +65,6 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
         self._latest_version: str | None = None
         self._release_notes: str | None = None
         self._release_url: str | None = None
-        self._attr_in_progress = False
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -142,89 +136,3 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
         except (TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.debug("Firmware update check failed: %s", err)
             self._coordinator.set_firmware_update_state("check_failed")
-
-    async def async_install(
-        self, version: str | None, backup: bool, **kwargs: Any
-    ) -> None:
-        """Trigger firmware OTA install on the Pi."""
-        host = self._entry.data.get("host", "")
-        port = self._entry.data.get("port", DEFAULT_PORT)
-        install_url = f"http://{host}:{port}{FIRMWARE_INSTALL_ENDPOINT}"
-        health_url = f"http://{host}:{port}/api/health"
-
-        payload: dict[str, Any] = {}
-        if version:
-            payload["version"] = version
-
-        # Capture the current version BEFORE posting so that a brief health-
-        # data gap during the install does not cause old_version = None and a
-        # spurious early exit from the polling loop.
-        old_version = self.installed_version or self._coordinator.health_data.get("version")
-
-        try:
-            async with aiohttp.ClientSession() as session, session.post(
-                install_url,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status not in (200, 202):
-                    body = await resp.text()
-                    _LOGGER.error("Install request rejected (%s): %s", resp.status, body)
-                    return
-        except (TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.error("Install request failed: %s", err)
-            return
-
-        self._attr_in_progress = True
-        self.async_write_ha_state()
-
-        # Poll /api/health until version changes or timeout.
-        new_version: str | None = None
-        deadline = asyncio.get_running_loop().time() + _INSTALL_POLL_TIMEOUT_S
-        while asyncio.get_running_loop().time() < deadline:
-            await asyncio.sleep(_INSTALL_POLL_INTERVAL_S)
-            try:
-                async with aiohttp.ClientSession() as session, session.get(
-                    health_url, timeout=aiohttp.ClientTimeout(total=5)
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        v = data.get("version")
-                        if v is not None and v != old_version:
-                            new_version = v
-                            # Patch coordinator health immediately so that
-                            # installed_version reflects the change right now
-                            # rather than waiting for the next health poll.
-                            self._coordinator._health_data["version"] = v
-                            self._coordinator._notify_health_listeners()
-                            _LOGGER.info(
-                                "CANtera Pi firmware updated: %s → %s",
-                                old_version,
-                                new_version,
-                            )
-                            break
-            except (TimeoutError, aiohttp.ClientError):
-                pass  # Pi may be restarting; keep polling
-
-        self._attr_in_progress = False
-        # Refresh latest_version from the Pi so the update card flips to
-        # "up to date" immediately instead of waiting for the hourly poll.
-        if new_version:
-            await self.async_update()
-        self.async_write_ha_state()
-
-        if new_version:
-            self.hass.components.persistent_notification.async_create(
-                f"CANtera Pi firmware updated successfully.\n\n"
-                f"**{old_version or 'previous version'} → {new_version}**\n\n"
-                f"The Pi service restarted automatically. All sensors are live.",
-                title="CANtera Pi Updated",
-                notification_id="cantera_firmware_updated",
-            )
-        else:
-            _LOGGER.warning(
-                "CANtera firmware install: version did not change within %ds "
-                "(old=%s). The Pi may still be installing in the background.",
-                _INSTALL_POLL_TIMEOUT_S,
-                old_version,
-            )

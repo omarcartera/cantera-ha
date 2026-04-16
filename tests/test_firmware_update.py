@@ -6,9 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
-from custom_components.cantera.const import (
-    FIRMWARE_INSTALL_ENDPOINT,
-)
 from custom_components.cantera.firmware_update import CanteraFirmwareUpdateEntity
 
 
@@ -94,86 +91,12 @@ class TestCanteraFirmwareUpdateEntity:
             await entity.async_update()
             mock_session_cls.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_install_posts_to_install_endpoint(self):
+    def test_install_feature_not_supported(self):
+        """Firmware update is not installable from HA — no Install button."""
+        from homeassistant.components.update import UpdateEntityFeature
 
-        coordinator = _mock_coordinator({"version": "0.3.0"})
-        entity = CanteraFirmwareUpdateEntity(coordinator, _mock_entry())
-        entity.async_write_ha_state = MagicMock()
-
-        post_response = AsyncMock()
-        post_response.status = 202
-
-        health_response = AsyncMock()
-        health_response.status = 200
-        health_response.json = AsyncMock(return_value={"version": "0.3.1"})
-
-        entity.hass = MagicMock()
-
-        with patch("aiohttp.ClientSession") as mock_session_cls:
-            mock_session = MagicMock()
-            mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_session.post.return_value.__aenter__ = AsyncMock(return_value=post_response)
-            mock_session.post.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_session.get.return_value.__aenter__ = AsyncMock(return_value=health_response)
-            mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            with patch("asyncio.get_running_loop") as mock_loop:
-                loop = MagicMock()
-                mock_loop.return_value = loop
-                # Deadline fires before the first poll so the loop exits immediately.
-                # Uses [0, 9999]: first call sets deadline=300, second check 9999>=300 exits.
-                loop.time.side_effect = [0, 9999]
-
-                with patch("asyncio.sleep", new_callable=AsyncMock):
-                    await entity.async_install(version="0.3.1", backup=False)
-
-        args, _ = mock_session.post.call_args
-        assert FIRMWARE_INSTALL_ENDPOINT in args[0]
-
-    @pytest.mark.asyncio
-    async def test_install_sets_in_progress_then_clears(self):
-
-        coordinator = _mock_coordinator({"version": "0.3.0"})
-        entity = CanteraFirmwareUpdateEntity(coordinator, _mock_entry())
-
-        in_progress_states: list[bool] = []
-        original_write = MagicMock(
-            side_effect=lambda: in_progress_states.append(entity._attr_in_progress)
-        )
-        entity.async_write_ha_state = original_write
-
-        post_response = AsyncMock()
-        post_response.status = 202
-
-        health_response = AsyncMock()
-        health_response.status = 200
-        health_response.json = AsyncMock(return_value={"version": "0.3.1"})
-
-        entity.hass = MagicMock()
-
-        with patch("aiohttp.ClientSession") as mock_session_cls:
-            mock_session = MagicMock()
-            mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_session.post.return_value.__aenter__ = AsyncMock(return_value=post_response)
-            mock_session.post.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_session.get.return_value.__aenter__ = AsyncMock(return_value=health_response)
-            mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            with patch("asyncio.get_running_loop") as mock_loop:
-                loop = MagicMock()
-                mock_loop.return_value = loop
-                loop.time.side_effect = [0, 9999]
-
-                with patch("asyncio.sleep", new_callable=AsyncMock):
-                    await entity.async_install(version=None, backup=False)
-
-        # First write_ha_state call: in_progress=True; second: in_progress=False
-        assert len(in_progress_states) == 2
-        assert in_progress_states[0] is True
-        assert in_progress_states[1] is False
+        entity = CanteraFirmwareUpdateEntity(_mock_coordinator(), _mock_entry())
+        assert UpdateEntityFeature.INSTALL not in entity._attr_supported_features
 
 
 # ---------------------------------------------------------------------------
@@ -303,133 +226,6 @@ async def test_async_update_503_does_not_set_latest_version():
 
     assert entity.latest_version is None
 
-
-# ---------------------------------------------------------------------------
-# async_install error paths (lines 144-149)
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_async_install_non_202_returns_before_setting_in_progress():
-    """Non-202 POST response → returns early without ever marking in_progress=True."""
-
-    entity = CanteraFirmwareUpdateEntity(_mock_coordinator(), _mock_entry())
-    entity.async_write_ha_state = MagicMock()
-
-    post_resp = AsyncMock()
-    post_resp.status = 500
-    post_resp.text = AsyncMock(return_value="Internal Server Error")
-
-    with patch("aiohttp.ClientSession") as mock_session_cls:
-        mock_session = MagicMock()
-        mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        mock_session.post.return_value.__aenter__ = AsyncMock(return_value=post_resp)
-        mock_session.post.return_value.__aexit__ = AsyncMock(return_value=False)
-        await entity.async_install(version=None, backup=False)
-
-    # install failed before reaching the in_progress block
-    entity.async_write_ha_state.assert_not_called()
-    assert entity._attr_in_progress is False
-
-
-@pytest.mark.asyncio
-async def test_async_install_client_error_returns_early():
-    """ClientError during POST → returns early, never sets in_progress."""
-    entity = CanteraFirmwareUpdateEntity(_mock_coordinator(), _mock_entry())
-    entity.async_write_ha_state = MagicMock()
-
-    with patch("aiohttp.ClientSession") as mock_session_cls:
-        mock_session_cls.return_value.__aenter__ = AsyncMock(
-            side_effect=aiohttp.ClientError("connection failed")
-        )
-        mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        await entity.async_install(version=None, backup=False)
-
-    entity.async_write_ha_state.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# async_install poll loop (lines 159-174)
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_async_install_poll_loop_client_error_is_swallowed():
-    """ClientError during health poll → loop continues (Pi may be restarting)."""
-    coordinator = _mock_coordinator({"version": "0.3.0"})
-    entity = CanteraFirmwareUpdateEntity(coordinator, _mock_entry())
-    entity.async_write_ha_state = MagicMock()
-
-    post_resp = AsyncMock()
-    post_resp.status = 202
-
-    with patch("aiohttp.ClientSession") as mock_session_cls:
-        mock_session = MagicMock()
-        mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        mock_session.post.return_value.__aenter__ = AsyncMock(return_value=post_resp)
-        mock_session.post.return_value.__aexit__ = AsyncMock(return_value=False)
-        # GET health fails with ClientError (Pi is restarting)
-        mock_session.get.return_value.__aenter__ = AsyncMock(
-            side_effect=aiohttp.ClientError("Pi restarting")
-        )
-        mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("asyncio.get_running_loop") as mock_loop:
-                loop = MagicMock()
-                mock_loop.return_value = loop
-                # Deadline fires before the first poll so the loop exits immediately.
-                loop.time.side_effect = [0, 9999]
-
-                with patch("asyncio.sleep", new_callable=AsyncMock):
-                    await entity.async_install(version=None, backup=False)
-
-    # Should complete cleanly with in_progress cleared
-    assert entity._attr_in_progress is False
-
-
-@pytest.mark.asyncio
-async def test_async_install_updates_coordinator_health_immediately():
-    """When version change is detected, coordinator health data is patched instantly
-    so installed_version reflects the new version without waiting for the next poll."""
-    coordinator = _mock_coordinator({"version": "0.3.0"})
-    # Use a real dict so we can assert the update happened.
-    coordinator._health_data = {"version": "0.3.0"}
-    coordinator._notify_health_listeners = MagicMock()
-    entity = CanteraFirmwareUpdateEntity(coordinator, _mock_entry())
-    entity.async_write_ha_state = MagicMock()
-    entity.hass = MagicMock()
-
-    post_resp = AsyncMock()
-    post_resp.status = 202
-
-    health_resp = AsyncMock()
-    health_resp.status = 200
-    health_resp.json = AsyncMock(return_value={"version": "0.3.1"})
-
-    with patch("aiohttp.ClientSession") as mock_session_cls:
-        mock_session = MagicMock()
-        mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        mock_session.post.return_value.__aenter__ = AsyncMock(return_value=post_resp)
-        mock_session.post.return_value.__aexit__ = AsyncMock(return_value=False)
-        mock_session.get.return_value.__aenter__ = AsyncMock(return_value=health_resp)
-        mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        # Two time() calls: set deadline (0), enter loop (0 < 300 → True),
-        # version changes → break before third call.
-        with patch("asyncio.get_running_loop") as mock_loop:
-            loop = MagicMock()
-            mock_loop.return_value = loop
-            loop.time.side_effect = [0, 0]
-
-            with patch("asyncio.sleep", new_callable=AsyncMock):
-                with patch.object(entity, "async_update", new_callable=AsyncMock):
-                    await entity.async_install(version=None, backup=False)
-
-    # Coordinator health data updated immediately, not waiting for next poll.
-    assert coordinator._health_data["version"] == "0.3.1"
-    coordinator._notify_health_listeners.assert_called()
-    assert entity._attr_in_progress is False
 
 
 # ---------------------------------------------------------------------------
