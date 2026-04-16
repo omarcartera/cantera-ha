@@ -113,6 +113,14 @@ class CanteraCoordinator:
         # rather than waiting out the full exponential backoff.
         self._sse_wake: asyncio.Event = asyncio.Event()
 
+        # Last-delivered Mode 09 values — deduplicate to avoid spurious
+        # write_ha_state() calls on every health poll (every 5 s).
+        self._mode09_cache: dict[str, str | None] = {
+            "vin": None,
+            "calibration_id": None,
+            "cvn": None,
+        }
+
     # ------------------------------------------------------------------
     # Public API — SSE readings
     # ------------------------------------------------------------------
@@ -277,6 +285,40 @@ class CanteraCoordinator:
             except Exception:
                 _LOGGER.exception("Bus stats listener %r raised an exception", cb)
 
+    def _notify_mode09_from_health(self) -> None:
+        """Deliver Mode 09 vehicle identity to registered reading listeners.
+
+        The health endpoint carries ``vin``, ``calibration_id``, and ``cvn``
+        fields since API minor version 4.  This method maps them to the same
+        slug → callback path used by the SSE stream so that Mode 09 HA sensors
+        are populated without a separate SSE event type.
+
+        Notifications are deduplicated: a listener is only called when the
+        value has changed since the last delivery.
+        """
+        # Mapping: health field → Mode 09 PID display name (must match const.py).
+        field_to_name = {
+            "vin": "Vehicle Identification Number (VIN)",
+            "calibration_id": "Calibration ID (CalID)",
+            "cvn": "Calibration Verification Number (CVN)",
+        }
+        now_ms = int(time.time() * 1000)
+        for field, pid_name in field_to_name.items():
+            value = self._health_data.get(field)
+            if value is None:
+                continue
+            value_str = str(value)
+            if value_str == self._mode09_cache.get(field):
+                continue  # unchanged — skip
+            self._mode09_cache[field] = value_str
+            slug = pid_name.lower().replace(" ", "_")
+            reading = {"pid": pid_name, "value": value_str, "unit": "", "ts": now_ms}
+            for cb in list(self._reading_listeners.get(slug, [])):
+                try:
+                    cb(reading)
+                except Exception:
+                    _LOGGER.exception("Mode 09 reading listener %r raised an exception", cb)
+
     def _update_car_off_debounce(self) -> None:
         """Update the car-off debounce timer from the latest health data.
 
@@ -293,6 +335,7 @@ class CanteraCoordinator:
         now_ms = int(datetime.now(UTC).timestamp() * 1000)
         is_live = (
             connected
+            and self._connected
             and last_ms > 0
             and (now_ms - last_ms) <= SYNC_STALE_THRESHOLD_S * 1000
         )
@@ -371,10 +414,16 @@ class CanteraCoordinator:
                         fw_status = self._health_data.get("firmware_update_status")
                         if fw_status is not None:
                             self.set_firmware_update_state(fw_status)
+                        # Deliver Mode 09 vehicle identity (VIN/CalID/CVN) via the
+                        # same reading-listener path used by SSE OBD readings.
+                        # The health endpoint carries these fields since API minor 4.
+                        # Only notify when the value is present and has changed to
+                        # avoid spurious write_ha_state() calls on every 5 s poll.
+                        self._notify_mode09_from_health()
                         self._notify_health_listeners()
                         _success = True
             except Exception:
-                pass
+                _LOGGER.debug("Health poll request failed", exc_info=True)
 
             if _success:
                 # Run compatibility check outside the network error handler so
@@ -569,7 +618,13 @@ class CanteraCoordinator:
                                 pid = reading["pid"]
                                 self._pid_units[pid] = reading.get("unit", "")
                                 slug = pid.lower().replace(" ", "_")
-                                for cb in list(self._reading_listeners.get(slug, [])):
+                                listeners = self._reading_listeners.get(slug, [])
+                                if not listeners:
+                                    _LOGGER.debug(
+                                        "No SSE listener registered for PID slug %r (pid=%r)",
+                                        slug, pid,
+                                    )
+                                for cb in list(listeners):
                                     try:
                                         cb(reading)
                                     except Exception:

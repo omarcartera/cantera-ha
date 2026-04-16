@@ -324,6 +324,7 @@ def test_sync_status_live_during_car_off_debounce_window(coordinator):
 def test_sync_status_car_off_resets_on_live(coordinator):
     """Once live data comes back, _car_off_since_mono is cleared."""
     coordinator._api_reachable = True
+    coordinator._connected = True
     coordinator._car_off_since_mono = time.monotonic() - SYNC_CAR_OFF_DEBOUNCE_S - 5
     now_ms = int(time.time() * 1000)
     coordinator._health_data = {"can_connected": True, "last_reading_ms": now_ms - 1000}
@@ -504,6 +505,7 @@ def test_car_off_timer_cleared_on_api_failure(coordinator):
 def test_was_ever_live_set_on_first_live_poll(coordinator):
     """_was_ever_live flips to True once health confirms a live reading."""
     coordinator._api_reachable = True
+    coordinator._connected = True
     now_ms = int(time.time() * 1000)
     coordinator._health_data = {"can_connected": True, "last_reading_ms": now_ms - 1000}
     assert not coordinator._was_ever_live
