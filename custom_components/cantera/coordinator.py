@@ -99,6 +99,8 @@ class CanteraCoordinator:
         self._api_compatible: bool | None = None
         self._reported_api_version: str | None = None
         self._api_incompatible_notified: bool = False
+        # Set once the first compatibility check completes (replaces busy-wait).
+        self._api_compat_event: asyncio.Event = asyncio.Event()
 
         # Firmware update check state (set by firmware_update.py after each poll).
         self._firmware_update_state: str = "not_checked"
@@ -465,6 +467,7 @@ class CanteraCoordinator:
                     "update Pi firmware to enable contract verification"
                 )
             self._api_compatible = True
+            self._api_compat_event.set()
             return
 
         major = api_ver.get("major", 0)
@@ -482,6 +485,7 @@ class CanteraCoordinator:
 
         was_compatible = self._api_compatible
         self._api_compatible = major == EXPECTED_API_VERSION_MAJOR
+        self._api_compat_event.set()
 
         if not self._api_compatible:
             # Cancel the active SSE task so _sse_loop immediately re-evaluates
@@ -534,8 +538,13 @@ class CanteraCoordinator:
         while True:
             # Block until the first health poll resolves compatibility (startup
             # guard against the race where SSE starts before health is checked).
-            while self._api_compatible is None:
-                await asyncio.sleep(1)
+            # 60-second timeout prevents indefinite blocking if health poll never succeeds.
+            if self._api_compatible is None:
+                try:
+                    await asyncio.wait_for(self._api_compat_event.wait(), timeout=60)
+                except asyncio.TimeoutError:
+                    _LOGGER.warning("API compatibility check timed out; proceeding assuming compatible")
+                    self._api_compatible = True
 
             # Hard-block when API major version is explicitly incompatible.
             if self._api_compatible is False:
