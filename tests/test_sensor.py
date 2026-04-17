@@ -34,6 +34,7 @@ from custom_components.cantera.sensor import (
 def mock_entry():
     entry = MagicMock()
     entry.data = {CONF_HOST: "192.168.1.100", CONF_PORT: 8088}
+    entry.options = {}
     entry.entry_id = "test_entry_id"
     return entry
 

@@ -50,6 +50,9 @@ HISTORY_BUCKET_MINUTES = 5  # HA statistics minimum bucket size
 # HA config entry keys
 CONF_HOST = "host"
 CONF_PORT = "port"
+# Options flow keys — stored in config_entry.options, not config_entry.data.
+CONF_HEALTH_POLL_INTERVAL = "health_poll_interval"
+CONF_CAR_OFF_DEBOUNCE = "car_off_debounce"
 
 # Device info
 DEVICE_MANUFACTURER = "CANtera"

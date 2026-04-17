@@ -12,6 +12,7 @@ from custom_components.cantera.coordinator import CanteraCoordinator
 def mock_entry():
     entry = MagicMock()
     entry.data = {CONF_HOST: "192.168.1.100", CONF_PORT: 8088}
+    entry.options = {}
     return entry
 
 

@@ -19,6 +19,8 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 
 from .const import (
+    CONF_CAR_OFF_DEBOUNCE,
+    CONF_HEALTH_POLL_INTERVAL,
     CONF_HOST,
     CONF_PORT,
     DEVICE_MANUFACTURER,
@@ -95,6 +97,7 @@ class CanteraCoordinator:
     def __init__(self, hass: HomeAssistant, config_entry) -> None:
         """Initialise the coordinator."""
         self._hass = hass
+        self._config_entry = config_entry
         self._entry_id: str = config_entry.entry_id
         self._host: str = config_entry.data[CONF_HOST]
         self._port: int = config_entry.data[CONF_PORT]
@@ -241,7 +244,7 @@ class CanteraCoordinator:
         - ``syncing``:     API reachable, history backfill is in progress.
         - ``car_off``:     API reachable, CAN not connected or readings stale,
                            AND the car-off condition has persisted for at least
-                           SYNC_CAR_OFF_DEBOUNCE_S seconds.
+                           ``car_off_debounce_s`` seconds.
         - ``live``:        API reachable, CAN connected, recent reading (<30 s),
                            or still within the car-off debounce window.
         """
@@ -256,10 +259,28 @@ class CanteraCoordinator:
         # responding between OBD poll cycles but quickly comes back.
         if (
             self._car_off_since_mono is not None
-            and time.monotonic() - self._car_off_since_mono >= SYNC_CAR_OFF_DEBOUNCE_S
+            and time.monotonic() - self._car_off_since_mono >= self.car_off_debounce_s
         ):
             return SYNC_STATUS_CAR_OFF
         return SYNC_STATUS_LIVE
+
+    @property
+    def health_poll_interval_s(self) -> int:
+        """Health poll interval in seconds, from options or const default."""
+        return int(
+            self._config_entry.options.get(
+                CONF_HEALTH_POLL_INTERVAL, HEALTH_POLL_INTERVAL_S
+            )
+        )
+
+    @property
+    def car_off_debounce_s(self) -> int:
+        """Car-off debounce duration in seconds, from options or const default."""
+        return int(
+            self._config_entry.options.get(
+                CONF_CAR_OFF_DEBOUNCE, SYNC_CAR_OFF_DEBOUNCE_S
+            )
+        )
 
     def add_health_listener(self, cb: Callable[[dict], None]) -> None:
         """Register a callback invoked on each health poll state change."""
@@ -380,7 +401,7 @@ class CanteraCoordinator:
         self._health_unsub = async_track_time_interval(
             self._hass,
             self._poll_health,
-            timedelta(seconds=HEALTH_POLL_INTERVAL_S),
+            timedelta(seconds=self.health_poll_interval_s),
         )
         # Run an immediate first poll without waiting for the interval.
         self._initial_health_task = self._hass.async_create_task(self._poll_health())

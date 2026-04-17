@@ -27,6 +27,22 @@
       "already_configured": "CANtera device is already configured."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "CANtera options",
+        "description": "Adjust polling behaviour. Changes take effect after the integration reloads.",
+        "data": {
+          "health_poll_interval": "Health poll interval (seconds)",
+          "car_off_debounce": "Car-off debounce (seconds)"
+        },
+        "data_description": {
+          "health_poll_interval": "How often to poll the Pi's /api/health endpoint (1–60 s).",
+          "car_off_debounce": "How long the car-off condition must persist before the sync-status sensor switches to 'car_off' (5–300 s)."
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "sync_status": {

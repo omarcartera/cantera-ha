@@ -10,12 +10,16 @@ from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
+    CONF_CAR_OFF_DEBOUNCE,
+    CONF_HEALTH_POLL_INTERVAL,
     CONF_HOST,
     CONF_PORT,
     DEFAULT_PORT,
     DEVICE_ENDPOINT,
     DOMAIN,
     HEALTH_ENDPOINT,
+    HEALTH_POLL_INTERVAL_S,
+    SYNC_CAR_OFF_DEBOUNCE_S,
 )
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -85,6 +89,14 @@ class CanteraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    @staticmethod
+    @config_entries.callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Return the options flow handler for this config entry."""
+        return CanteraOptionsFlowHandler(config_entry)
+
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
@@ -145,4 +157,42 @@ class CanteraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+        )
+
+
+class CanteraOptionsFlowHandler(config_entries.OptionsFlow):
+    """Options flow: lets users tune polling interval and car-off debounce.
+
+    Changes here trigger an integration reload so the coordinator picks up the
+    new values without requiring the user to remove and re-add the device.
+    """
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Store the config entry for reading current option values."""
+        self._config_entry = config_entry
+
+    async def async_step_init(self, user_input=None) -> config_entries.ConfigFlowResult:
+        """Show the options form."""
+        current_poll = self._config_entry.options.get(
+            CONF_HEALTH_POLL_INTERVAL, HEALTH_POLL_INTERVAL_S
+        )
+        current_debounce = self._config_entry.options.get(
+            CONF_CAR_OFF_DEBOUNCE, SYNC_CAR_OFF_DEBOUNCE_S
+        )
+
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_HEALTH_POLL_INTERVAL, default=current_poll
+                    ): vol.All(int, vol.Range(min=1, max=60)),
+                    vol.Optional(
+                        CONF_CAR_OFF_DEBOUNCE, default=current_debounce
+                    ): vol.All(int, vol.Range(min=5, max=300)),
+                }
+            ),
         )
