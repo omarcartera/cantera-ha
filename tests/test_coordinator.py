@@ -793,3 +793,82 @@ def test_sync_status_not_incompatible_when_compatible(coordinator):
     coordinator._api_compatible = True
     coordinator._api_reachable = False
     assert coordinator.sync_status != SYNC_STATUS_INCOMPATIBLE
+
+
+# ---------------------------------------------------------------------------
+# W5-6 Test coverage gaps
+# ---------------------------------------------------------------------------
+
+
+async def test_sse_backoff_sleep_exits_early_on_wake(hass, mock_entry):
+    """_sse_backoff_sleep exits before the timeout when _sse_wake is set."""
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    coordinator._sse_wake.clear()
+
+    async def _set_wake_soon():
+        await asyncio.sleep(0)  # yield once so backoff sleep starts
+        coordinator._sse_wake.set()
+
+    # Request a 30-second backoff but wake immediately — task must finish fast.
+    wake_task = asyncio.ensure_future(_set_wake_soon())
+    await coordinator._sse_backoff_sleep(30.0)
+    await wake_task
+
+    # After exiting, _sse_wake must have been cleared by _sse_backoff_sleep.
+    assert not coordinator._sse_wake.is_set()
+
+
+def test_notify_mode09_dedup_same_value(coordinator):
+    """_notify_mode09_from_health only fires the listener once for repeated identical values."""
+    calls: list[dict] = []
+
+    slug = "vehicle_identification_number_(vin)"
+    coordinator._reading_listeners[slug] = [lambda reading: calls.append(reading)]
+    coordinator._health_data = {"vin": "WVWZZZ3CZPE123456"}
+
+    coordinator._notify_mode09_from_health()
+    coordinator._notify_mode09_from_health()  # same data — should be deduped
+
+    assert len(calls) == 1, "Listener must only fire once for repeated identical VIN values"
+
+
+def test_notify_mode09_dedup_different_value(coordinator):
+    """_notify_mode09_from_health fires again when the value changes."""
+    calls: list[dict] = []
+
+    slug = "vehicle_identification_number_(vin)"
+    coordinator._reading_listeners[slug] = [lambda reading: calls.append(reading)]
+
+    coordinator._health_data = {"vin": "WVWZZZ3CZPE111111"}
+    coordinator._notify_mode09_from_health()
+
+    coordinator._health_data = {"vin": "WVWZZZ3CZPE999999"}
+    coordinator._notify_mode09_from_health()
+
+    assert len(calls) == 2, "Listener must fire again when the VIN value changes"
+
+
+async def test_incompatible_api_version_cancels_sse_task(hass, mock_entry):
+    """_verify_api_compatibility with a mismatched major version cancels the SSE task."""
+    from custom_components.cantera.const import EXPECTED_API_VERSION_MAJOR
+
+    coordinator = CanteraCoordinator(hass, mock_entry)
+
+    # Simulate a running SSE task with a never-completing coroutine.
+    async def _never_done() -> None:
+        await asyncio.sleep(9999)
+
+    fake_sse_task = asyncio.ensure_future(_never_done())
+    coordinator._sse_task = fake_sse_task
+
+    incompatible_major = EXPECTED_API_VERSION_MAJOR + 1
+    health_data = {"api_version": {"major": incompatible_major, "minor": 0}}
+
+    with patch.object(coordinator._hass.services, "async_call", new_callable=AsyncMock):
+        await coordinator._verify_api_compatibility(health_data)
+
+    assert coordinator._api_compatible is False
+    assert coordinator.sync_status == "incompatible"
+    # The original task must have been cancelled.  Yield to let it process.
+    await asyncio.sleep(0)
+    assert fake_sse_task.cancelled()
