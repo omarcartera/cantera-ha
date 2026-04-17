@@ -14,7 +14,7 @@ from homeassistant.components.recorder.models import (
 from homeassistant.components.recorder.statistics import async_add_external_statistics
 from homeassistant.util.dt import utc_from_timestamp
 
-from .const import DOMAIN, HISTORY_BUCKET_MINUTES
+from .const import DOMAIN, HISTORY_BUCKET_MINUTES, UNIT_DEVICE_CLASS_MAP
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -77,6 +77,7 @@ async def import_statistics(
 
     for pid_name, stat_buckets in aggregated.items():
         unit = pid_units.get(pid_name, "")
+        unit_class = UNIT_DEVICE_CLASS_MAP.get(unit) if unit else None
         statistic_id = f"{DOMAIN}:{pid_name.lower().replace(' ', '_')}"
         source = DOMAIN
 
@@ -86,7 +87,7 @@ async def import_statistics(
             name=pid_name,
             source=source,
             statistic_id=statistic_id,
-            unit_class=None,
+            unit_class=unit_class,
             unit_of_measurement=unit or None,
         )
 

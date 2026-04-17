@@ -25,7 +25,9 @@ from .const import (
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): str,
-        vol.Optional(CONF_PORT, default=DEFAULT_PORT): int,
+        vol.Optional(CONF_PORT, default=DEFAULT_PORT): vol.All(
+            int, vol.Range(min=1, max=65535)
+        ),
     }
 )
 
@@ -153,7 +155,9 @@ class CanteraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_HOST, default=current_host): str,
-                    vol.Optional(CONF_PORT, default=current_port): int,
+                    vol.Optional(CONF_PORT, default=current_port): vol.All(
+                        int, vol.Range(min=1, max=65535)
+                    ),
                 }
             ),
             errors=errors,

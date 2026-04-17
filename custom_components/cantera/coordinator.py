@@ -467,7 +467,7 @@ class CanteraCoordinator:
                         self._notify_mode09_from_health()
                         self._notify_health_listeners()
                         _success = True
-            except Exception:
+            except (TimeoutError, aiohttp.ClientError, OSError):
                 _LOGGER.debug("Health poll request failed", exc_info=True)
 
             if _success:
