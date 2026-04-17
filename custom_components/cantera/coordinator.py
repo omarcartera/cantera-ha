@@ -45,7 +45,6 @@ from .const import (
 )
 from .ha_statistics import import_statistics
 
-STORAGE_KEY = f"{DOMAIN}.last_sync"
 STORAGE_VERSION = 1
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,7 +63,11 @@ class CanteraCoordinator:
         self._reading_listeners: dict[str, list[Callable[[dict], None]]] = defaultdict(list)
         self._sse_task: asyncio.Task | None = None
         self._pid_units: dict[str, str] = {}
-        self._store: Store[dict] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        # Scope storage key to this config entry so two CANtera devices don't
+        # share a last-sync timestamp (would cause missed/duplicate backfill).
+        self._store: Store[dict] = Store(
+            hass, STORAGE_VERSION, f"{DOMAIN}.{self._entry_id}.last_sync"
+        )
         self._connected: bool = False
         self._connection_listeners: list[Callable[[], None]] = []
 
