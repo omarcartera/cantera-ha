@@ -334,7 +334,7 @@ async def test_unload_cleans_up_hass_data(hass, mock_entry):
 # ---------------------------------------------------------------------------
 
 async def test_reconnect_service_handler_calls_stop_and_start(hass, mock_entry):
-    """_handle_reconnect calls coordinator.stop() and .start()."""
+    """_handle_reconnect calls coordinator.stop() and .start() for every active entry."""
     coordinator = MagicMock()
     coordinator.start = MagicMock()
     coordinator.stop = AsyncMock()
@@ -351,6 +351,8 @@ async def test_reconnect_service_handler_calls_stop_and_start(hass, mock_entry):
     handler = reconnect_call[0][2]
 
     mock_entry.runtime_data = coordinator
+    # Handler iterates all active entries — return the single test entry.
+    hass.config_entries.async_entries.return_value = [mock_entry]
     coordinator.start.reset_mock()
     coordinator.stop.reset_mock()
     await handler(MagicMock())
@@ -387,6 +389,8 @@ async def test_request_history_service_creates_task_when_not_running(hass, mock_
     handler = history_call[0][2]
 
     mock_entry.runtime_data = coordinator
+    # Handler iterates all active entries — return the single test entry.
+    hass.config_entries.async_entries.return_value = [mock_entry]
     await handler(MagicMock())
 
     assert len(created_tasks) >= 1

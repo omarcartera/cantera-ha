@@ -40,18 +40,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _CURRENT_UNIQUE_IDS_KEY: set()
     }
 
+    # Register domain-level services once, but handlers iterate ALL active entries
+    # so that both reconnect and request_history work regardless of which entry
+    # was set up first.  The has_service guard prevents double-registration; on
+    # unload we only deregister when the last entry is removed.
     if not hass.services.has_service(DOMAIN, "reconnect"):
         async def _handle_reconnect(call: ServiceCall) -> None:
-            coord: CanteraCoordinator = entry.runtime_data
-            await coord.stop()
-            coord.start()
+            for active_entry in hass.config_entries.async_entries(DOMAIN):
+                coord: CanteraCoordinator = active_entry.runtime_data
+                await coord.stop()
+                coord.start()
 
         async def _handle_request_history(call: ServiceCall) -> None:
-            coord: CanteraCoordinator = entry.runtime_data
-            if coord._backfill_task is None or coord._backfill_task.done():
-                coord._backfill_task = hass.async_create_task(
-                    coord._backfill_history()
-                )
+            for active_entry in hass.config_entries.async_entries(DOMAIN):
+                coord: CanteraCoordinator = active_entry.runtime_data
+                if coord._backfill_task is None or coord._backfill_task.done():
+                    coord._backfill_task = hass.async_create_task(
+                        coord._backfill_history()
+                    )
 
         hass.services.async_register(DOMAIN, "reconnect", _handle_reconnect)
         hass.services.async_register(DOMAIN, "request_history", _handle_request_history)
@@ -120,7 +126,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         coordinator: CanteraCoordinator = entry.runtime_data
         await coordinator.stop()
-        hass.services.async_remove(DOMAIN, "reconnect")
-        hass.services.async_remove(DOMAIN, "request_history")
+        # Only remove domain services when the last config entry is unloaded.
+        remaining = [
+            e for e in hass.config_entries.async_entries(DOMAIN)
+            if e.entry_id != entry.entry_id
+        ]
+        if not remaining:
+            hass.services.async_remove(DOMAIN, "reconnect")
+            hass.services.async_remove(DOMAIN, "request_history")
         hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     return unload_ok
