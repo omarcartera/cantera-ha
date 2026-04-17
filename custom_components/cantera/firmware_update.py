@@ -19,6 +19,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     DEFAULT_PORT,
@@ -104,10 +105,8 @@ class CanteraFirmwareUpdateEntity(UpdateEntity):
 
         try:
             _timeout = aiohttp.ClientTimeout(total=10)
-            async with (
-                aiohttp.ClientSession() as session,
-                session.get(url, timeout=_timeout) as resp,
-            ):
+            session = async_get_clientsession(self.hass)
+            async with session.get(url, timeout=_timeout) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     self._latest_version = data.get("latest_version")

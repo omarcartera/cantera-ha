@@ -600,7 +600,8 @@ class CanteraCoordinator:
             )
 
         _LOGGER.info("Connecting to CANtera SSE stream at %s", url)
-        async with aiohttp.ClientSession() as session, session.get(url, timeout=timeout) as resp:
+        session = async_get_clientsession(self._hass)
+        async with session.get(url, timeout=timeout) as resp:
                 if resp.status != 200:
                     raise ConnectionError(f"SSE returned HTTP {resp.status}")
                 self._set_connected(True)

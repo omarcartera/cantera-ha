@@ -60,10 +60,9 @@ class TestCanteraFirmwareUpdateEntity:
             }
         )
 
-        with patch("aiohttp.ClientSession") as mock_session_cls:
+        with patch("custom_components.cantera.firmware_update.async_get_clientsession") as mock_fn:
             mock_session = MagicMock()
-            mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_fn.return_value = mock_session
             mock_session.get.return_value.__aenter__ = AsyncMock(return_value=mock_response)
             mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -87,9 +86,9 @@ class TestCanteraFirmwareUpdateEntity:
         coordinator = _mock_coordinator(api_offline=True)
         entity = CanteraFirmwareUpdateEntity(coordinator, _mock_entry())
 
-        with patch("aiohttp.ClientSession") as mock_session_cls:
+        with patch("custom_components.cantera.firmware_update.async_get_clientsession") as mock_fn:
             await entity.async_update()
-            mock_session_cls.assert_not_called()
+            mock_fn.assert_not_called()
 
     def test_install_feature_not_supported(self):
         """Firmware update is not installable from HA — no Install button."""
@@ -216,10 +215,9 @@ async def test_async_update_503_does_not_set_latest_version():
     mock_resp = AsyncMock()
     mock_resp.status = 503
 
-    with patch("aiohttp.ClientSession") as mock_session_cls:
+    with patch("custom_components.cantera.firmware_update.async_get_clientsession") as mock_fn:
         mock_session = MagicMock()
-        mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_fn.return_value = mock_session
         mock_session.get.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
         await entity.async_update()
@@ -233,10 +231,8 @@ async def test_async_update_503_does_not_set_latest_version():
 # ---------------------------------------------------------------------------
 
 def _make_mock_session(get_resp):
-    """Return a patched aiohttp.ClientSession that returns get_resp for GET."""
+    """Return a mock session as returned by async_get_clientsession."""
     mock_session = MagicMock()
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=False)
     mock_session.get.return_value.__aenter__ = AsyncMock(return_value=get_resp)
     mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
     return mock_session
@@ -259,7 +255,8 @@ async def test_async_update_uses_pi_status_field_up_to_date():
         "last_checked_utc": "2026-04-11T09:00:00Z",
     })
 
-    with patch("aiohttp.ClientSession", return_value=_make_mock_session(resp)):
+    with patch("custom_components.cantera.firmware_update.async_get_clientsession") as mock_fn:
+        mock_fn.return_value = _make_mock_session(resp)
         await entity.async_update()
 
     coordinator.set_firmware_update_state.assert_called_with("up_to_date")
@@ -282,7 +279,8 @@ async def test_async_update_uses_pi_status_field_update_available():
         "last_checked_utc": "2026-04-11T09:00:00Z",
     })
 
-    with patch("aiohttp.ClientSession", return_value=_make_mock_session(resp)):
+    with patch("custom_components.cantera.firmware_update.async_get_clientsession") as mock_fn:
+        mock_fn.return_value = _make_mock_session(resp)
         await entity.async_update()
 
     coordinator.set_firmware_update_state.assert_called_with("update_available")
@@ -305,7 +303,8 @@ async def test_async_update_uses_pi_status_field_not_checked():
         "last_checked_utc": None,
     })
 
-    with patch("aiohttp.ClientSession", return_value=_make_mock_session(resp)):
+    with patch("custom_components.cantera.firmware_update.async_get_clientsession") as mock_fn:
+        mock_fn.return_value = _make_mock_session(resp)
         await entity.async_update()
 
     coordinator.set_firmware_update_state.assert_called_with("not_checked")
@@ -328,7 +327,8 @@ async def test_async_update_fallback_when_status_field_absent():
         "last_checked_utc": "2026-04-11T09:00:00Z",
     })
 
-    with patch("aiohttp.ClientSession", return_value=_make_mock_session(resp)):
+    with patch("custom_components.cantera.firmware_update.async_get_clientsession") as mock_fn:
+        mock_fn.return_value = _make_mock_session(resp)
         await entity.async_update()
 
     coordinator.set_firmware_update_state.assert_called_with("update_available")
@@ -350,7 +350,8 @@ async def test_async_update_fallback_no_status_no_check():
         "last_checked_utc": None,
     })
 
-    with patch("aiohttp.ClientSession", return_value=_make_mock_session(resp)):
+    with patch("custom_components.cantera.firmware_update.async_get_clientsession") as mock_fn:
+        mock_fn.return_value = _make_mock_session(resp)
         await entity.async_update()
 
     coordinator.set_firmware_update_state.assert_called_with("not_checked")
@@ -374,7 +375,8 @@ async def test_async_update_sets_checking_then_final_state():
         "last_checked_utc": "2026-04-11T09:00:00Z",
     })
 
-    with patch("aiohttp.ClientSession", return_value=_make_mock_session(resp)):
+    with patch("custom_components.cantera.firmware_update.async_get_clientsession") as mock_fn:
+        mock_fn.return_value = _make_mock_session(resp)
         await entity.async_update()
 
     assert calls == ["checking", "up_to_date"]

@@ -607,10 +607,9 @@ async def test_connect_and_stream_non_200_raises(hass, mock_entry):
     mock_resp = AsyncMock()
     mock_resp.status = 503
 
-    with patch("aiohttp.ClientSession") as mock_session_cls:
+    with patch("custom_components.cantera.coordinator.async_get_clientsession") as mock_session_fn:
         mock_session = MagicMock()
-        mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_session_fn.return_value = mock_session
         mock_session.get.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -649,10 +648,9 @@ async def test_connect_and_stream_dispatches_sse_readings(hass, mock_entry):
     mock_resp.status = 200
     mock_resp.content = _AsyncLineIter(sse_lines)
 
-    with patch("aiohttp.ClientSession") as mock_session_cls:
+    with patch("custom_components.cantera.coordinator.async_get_clientsession") as mock_session_fn:
         mock_session = MagicMock()
-        mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_session_fn.return_value = mock_session
         mock_session.get.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -679,10 +677,9 @@ async def test_connect_and_stream_sets_connected_true_on_200(hass, mock_entry):
     mock_resp.status = 200
     mock_resp.content = _Empty()
 
-    with patch("aiohttp.ClientSession") as mock_session_cls:
+    with patch("custom_components.cantera.coordinator.async_get_clientsession") as mock_session_fn:
         mock_session = MagicMock()
-        mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_session_fn.return_value = mock_session
         mock_session.get.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
 
