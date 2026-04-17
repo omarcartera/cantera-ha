@@ -139,13 +139,19 @@ class CanteraSensor(RestoreSensor):
             self._attr_state_class = None
             self._attr_suggested_display_precision = None
         else:
-            sc_str = UNIT_STATE_CLASS_MAP.get(unit, "measurement") if unit else "measurement"
-            self._attr_state_class = (
-                _STATE_CLASS_LOOKUP.get(sc_str, SensorStateClass.MEASUREMENT)
-                if sc_str
-                else SensorStateClass.MEASUREMENT
-            )
-            self._attr_suggested_display_precision = UNIT_PRECISION_MAP.get(unit) if unit else None
+            if unit is None:
+                # Non-numeric PIDs (bitmaps, status enums, DTC data) have no unit.
+                # Setting MEASUREMENT on them causes recorder errors; leave unset.
+                self._attr_state_class = None
+                self._attr_suggested_display_precision = None
+            else:
+                sc_str = UNIT_STATE_CLASS_MAP.get(unit, "measurement")
+                self._attr_state_class = (
+                    _STATE_CLASS_LOOKUP.get(sc_str, SensorStateClass.MEASUREMENT)
+                    if sc_str
+                    else SensorStateClass.MEASUREMENT
+                )
+                self._attr_suggested_display_precision = UNIT_PRECISION_MAP.get(unit)
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"cantera_vehicle_{entry_id}")},
