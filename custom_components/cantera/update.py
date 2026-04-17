@@ -20,6 +20,7 @@ integration-panel version stale until the next restart.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re as _re
@@ -366,7 +367,17 @@ class CanteraUpdateEntity(UpdateEntity):
                 allow_redirects=True,
             ) as resp:
                 resp.raise_for_status()
-                zip_path.write_bytes(await resp.read())
+                zip_bytes = await resp.read()
+
+            # Log the SHA256 of the downloaded archive so operators can audit
+            # what was installed.  Without a trusted reference hash published
+            # alongside the release, we cannot actively *reject* a bad archive,
+            # but having the hash in the log gives a post-hoc verification path.
+            archive_sha256 = hashlib.sha256(zip_bytes).hexdigest()
+            _LOGGER.info(
+                "Downloaded CANtera release archive — SHA256: %s", archive_sha256
+            )
+            zip_path.write_bytes(zip_bytes)
 
             extracted = tmp_path / "extracted"
             extracted.mkdir()
