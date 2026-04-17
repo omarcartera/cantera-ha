@@ -9,6 +9,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any, Generic, TypeVar
 
 import aiohttp
 from homeassistant.core import HomeAssistant
@@ -49,6 +50,44 @@ STORAGE_VERSION = 1
 
 _LOGGER = logging.getLogger(__name__)
 
+_T = TypeVar("_T")
+
+
+class ListenerRegistry(Generic[_T]):
+    """Generic fan-out listener list with add, remove, and notify.
+
+    Eliminates the repetitive add/remove/try-except boilerplate that
+    previously appeared six times in ``CanteraCoordinator``.
+
+    Usage::
+
+        reg: ListenerRegistry[dict] = ListenerRegistry("health")
+        reg.add(my_callback)
+        reg.notify({"can_connected": True})   # calls my_callback({"can_connected": True})
+        reg.notify()                           # valid for zero-arg callbacks (T = None)
+    """
+
+    def __init__(self, label: str) -> None:
+        self._label = label
+        self._listeners: list[Callable[..., None]] = []
+
+    def add(self, cb: Callable[..., None]) -> None:
+        """Register a listener callback."""
+        self._listeners.append(cb)
+
+    def remove(self, cb: Callable[..., None]) -> None:
+        """Unregister a listener callback (no-op if not registered)."""
+        with contextlib.suppress(ValueError):
+            self._listeners.remove(cb)
+
+    def notify(self, *args: Any, **kwargs: Any) -> None:
+        """Call every registered listener, logging exceptions instead of raising."""
+        for cb in list(self._listeners):
+            try:
+                cb(*args, **kwargs)
+            except Exception:
+                _LOGGER.exception("%s listener %r raised an exception", self._label, cb)
+
 
 class CanteraCoordinator:
     """Manages SSE connection, health polling, and history backfill."""
@@ -69,10 +108,10 @@ class CanteraCoordinator:
             hass, STORAGE_VERSION, f"{DOMAIN}.{self._entry_id}.last_sync"
         )
         self._connected: bool = False
-        self._connection_listeners: list[Callable[[], None]] = []
+        self._connection_reg: ListenerRegistry[None] = ListenerRegistry("connection")
 
         # Health polling state
-        self._health_listeners: list[Callable[[dict], None]] = []
+        self._health_reg: ListenerRegistry[dict] = ListenerRegistry("health")
         self._health_data: dict = {}
         self._consecutive_health_failures: int = 0
         self._api_reachable: bool = False
@@ -107,10 +146,10 @@ class CanteraCoordinator:
 
         # Firmware update check state (set by firmware_update.py after each poll).
         self._firmware_update_state: str = "not_checked"
-        self._firmware_state_listeners: list[Callable[[str], None]] = []
+        self._firmware_reg: ListenerRegistry[str] = ListenerRegistry("firmware")
 
         # Bus statistics listeners — notified via SSE 'bus_stats' events.
-        self._bus_stats_listeners: list[Callable[[dict], None]] = []
+        self._bus_stats_reg: ListenerRegistry[dict] = ListenerRegistry("bus_stats")
 
         # Event set by the health poller whenever the Pi transitions from
         # unreachable → reachable.  The SSE reconnect sleep awaits this so that
@@ -137,22 +176,17 @@ class CanteraCoordinator:
 
     def add_connection_listener(self, cb: Callable[[], None]) -> None:
         """Register a callback invoked when connection state changes."""
-        self._connection_listeners.append(cb)
+        self._connection_reg.add(cb)
 
     def remove_connection_listener(self, cb: Callable[[], None]) -> None:
         """Remove a connection state change callback."""
-        with contextlib.suppress(ValueError):
-            self._connection_listeners.remove(cb)
+        self._connection_reg.remove(cb)
 
     def _set_connected(self, value: bool) -> None:
         """Update connection state and notify listeners."""
         if self._connected != value:
             self._connected = value
-            for cb in list(self._connection_listeners):
-                try:
-                    cb()
-                except Exception:
-                    _LOGGER.exception("Connection listener %r raised an exception", cb)
+            self._connection_reg.notify()
 
     def add_reading_listener(self, slug: str, cb: Callable[[dict], None]) -> None:
         """Register a callback invoked when a reading for ``slug`` arrives."""
@@ -229,19 +263,14 @@ class CanteraCoordinator:
 
     def add_health_listener(self, cb: Callable[[dict], None]) -> None:
         """Register a callback invoked on each health poll state change."""
-        self._health_listeners.append(cb)
+        self._health_reg.add(cb)
 
     def remove_health_listener(self, cb: Callable[[dict], None]) -> None:
         """Remove a health poll callback."""
-        with contextlib.suppress(ValueError):
-            self._health_listeners.remove(cb)
+        self._health_reg.remove(cb)
 
     def _notify_health_listeners(self) -> None:
-        for cb in list(self._health_listeners):
-            try:
-                cb(self._health_data)
-            except Exception:
-                _LOGGER.exception("Health listener %r raised an exception", cb)
+        self._health_reg.notify(self._health_data)
 
     # ------------------------------------------------------------------
     # Firmware update state
@@ -259,36 +288,26 @@ class CanteraCoordinator:
     def set_firmware_update_state(self, state: str) -> None:
         """Update firmware check state and notify registered listeners."""
         self._firmware_update_state = state
-        for cb in list(self._firmware_state_listeners):
-            try:
-                cb(state)
-            except Exception:
-                _LOGGER.exception("Firmware state listener %r raised an exception", cb)
+        self._firmware_reg.notify(state)
 
     def add_firmware_state_listener(self, cb: Callable[[str], None]) -> None:
         """Register a callback invoked when firmware update state changes."""
-        self._firmware_state_listeners.append(cb)
+        self._firmware_reg.add(cb)
 
     def remove_firmware_state_listener(self, cb: Callable[[str], None]) -> None:
         """Remove a firmware state change callback."""
-        with contextlib.suppress(ValueError):
-            self._firmware_state_listeners.remove(cb)
+        self._firmware_reg.remove(cb)
 
     def add_bus_stats_listener(self, cb: Callable[[dict], None]) -> None:
         """Register a callback invoked on each SSE 'bus_stats' event."""
-        self._bus_stats_listeners.append(cb)
+        self._bus_stats_reg.add(cb)
 
     def remove_bus_stats_listener(self, cb: Callable[[dict], None]) -> None:
         """Remove a bus stats callback."""
-        with contextlib.suppress(ValueError):
-            self._bus_stats_listeners.remove(cb)
+        self._bus_stats_reg.remove(cb)
 
     def _notify_bus_stats_listeners(self, stats: dict) -> None:
-        for cb in list(self._bus_stats_listeners):
-            try:
-                cb(stats)
-            except Exception:
-                _LOGGER.exception("Bus stats listener %r raised an exception", cb)
+        self._bus_stats_reg.notify(stats)
 
     def _notify_mode09_from_health(self) -> None:
         """Deliver Mode 09 vehicle identity to registered reading listeners.

@@ -692,7 +692,7 @@ class TestCanteraSensorLifecycle:
             await s.async_added_to_hass()
 
         assert s._handle_reading in coordinator._reading_listeners.get("engine_rpm", [])
-        assert s._handle_health_update in coordinator._health_listeners
+        assert s._handle_health_update in coordinator._health_reg._listeners
 
     async def test_async_added_to_hass_restores_previous_state(self, hass, mock_entry):
         """async_added_to_hass restores native_value from the recorder."""
@@ -741,7 +741,7 @@ class TestCanteraSensorLifecycle:
         await s.async_will_remove_from_hass()
 
         assert s._handle_reading not in coordinator._reading_listeners.get("engine_rpm", [])
-        assert s._handle_health_update not in coordinator._health_listeners
+        assert s._handle_health_update not in coordinator._health_reg._listeners
 
 
 # ---------------------------------------------------------------------------
@@ -781,7 +781,7 @@ class TestSyncStatusSensorLifecycle:
         ):
             await s.async_added_to_hass()
 
-        assert s._handle_health_update in coordinator._health_listeners
+        assert s._handle_health_update in coordinator._health_reg._listeners
 
     async def test_async_will_remove_from_hass_removes_health_listener(self, hass, mock_entry):
         """CanteraSyncStatusSensor deregisters its health listener on remove."""
@@ -798,7 +798,7 @@ class TestSyncStatusSensorLifecycle:
             await s.async_added_to_hass()
         await s.async_will_remove_from_hass()
 
-        assert s._handle_health_update not in coordinator._health_listeners
+        assert s._handle_health_update not in coordinator._health_reg._listeners
 
 
 # ---------------------------------------------------------------------------
@@ -931,7 +931,7 @@ async def test_firmware_version_registers_health_listener(hass, mock_entry):
     ):
         await s.async_added_to_hass()
 
-    assert s._handle_health_update in coordinator._health_listeners
+    assert s._handle_health_update in coordinator._health_reg._listeners
 
 
 async def test_firmware_version_unregisters_health_listener_on_remove(hass, mock_entry):
@@ -940,10 +940,10 @@ async def test_firmware_version_unregisters_health_listener_on_remove(hass, mock
 
     coordinator = CanteraCoordinator(hass, mock_entry)
     s = CanteraFirmwareVersionSensor(coordinator, mock_entry)
-    coordinator._health_listeners.append(s._handle_health_update)
+    coordinator._health_reg.add(s._handle_health_update)
 
     await s.async_will_remove_from_hass()
-    assert s._handle_health_update not in coordinator._health_listeners
+    assert s._handle_health_update not in coordinator._health_reg._listeners
 
 
 # ---------------------------------------------------------------------------
@@ -1056,7 +1056,7 @@ async def test_pi_api_version_registers_health_listener(hass, mock_entry):
     ):
         await s.async_added_to_hass()
 
-    assert s._handle_health_update in coordinator._health_listeners
+    assert s._handle_health_update in coordinator._health_reg._listeners
 
 
 async def test_pi_api_version_unregisters_health_listener_on_remove(hass, mock_entry):
@@ -1065,10 +1065,10 @@ async def test_pi_api_version_unregisters_health_listener_on_remove(hass, mock_e
 
     coordinator = CanteraCoordinator(hass, mock_entry)
     s = CanteraPiApiVersionSensor(coordinator, mock_entry)
-    coordinator._health_listeners.append(s._handle_health_update)
+    coordinator._health_reg.add(s._handle_health_update)
 
     await s.async_will_remove_from_hass()
-    assert s._handle_health_update not in coordinator._health_listeners
+    assert s._handle_health_update not in coordinator._health_reg._listeners
 
 
 # ---------------------------------------------------------------------------
@@ -1191,9 +1191,9 @@ async def test_firmware_update_status_registers_listener(hass, mock_entry):
     s.async_write_ha_state = MagicMock()
     s.hass = hass
 
-    assert len(coordinator._firmware_state_listeners) == 0
+    assert len(coordinator._firmware_reg._listeners) == 0
     await s.async_added_to_hass()
-    assert len(coordinator._firmware_state_listeners) == 1
+    assert len(coordinator._firmware_reg._listeners) == 1
 
 
 async def test_firmware_update_status_unregisters_listener_on_remove(hass, mock_entry):
@@ -1206,9 +1206,9 @@ async def test_firmware_update_status_unregisters_listener_on_remove(hass, mock_
     s.hass = hass
 
     await s.async_added_to_hass()
-    assert len(coordinator._firmware_state_listeners) == 1
+    assert len(coordinator._firmware_reg._listeners) == 1
     await s.async_will_remove_from_hass()
-    assert len(coordinator._firmware_state_listeners) == 0
+    assert len(coordinator._firmware_reg._listeners) == 0
 
 
 def test_firmware_update_status_write_ha_state_called_on_update(hass, mock_entry):
@@ -1219,7 +1219,7 @@ def test_firmware_update_status_write_ha_state_called_on_update(hass, mock_entry
     s = CanteraFirmwareUpdateStatusSensor(coordinator, mock_entry)
     s.async_write_ha_state = MagicMock()
 
-    coordinator._firmware_state_listeners.append(s._handle_firmware_state)
+    coordinator._firmware_reg.add(s._handle_firmware_state)
     coordinator.set_firmware_update_state("update_available")
 
     s.async_write_ha_state.assert_called_once()
@@ -1344,16 +1344,16 @@ def test_bus_load_listener_registered_in_coordinator(coordinator, mock_entry):
     """async_added_to_hass registers both health and bus_stats listeners."""
     s = CanteraBusLoadSensor(coordinator, mock_entry)
     s.async_write_ha_state = MagicMock()
-    before_health = len(coordinator._health_listeners)
-    before_bus = len(coordinator._bus_stats_listeners)
+    before_health = len(coordinator._health_reg._listeners)
+    before_bus = len(coordinator._bus_stats_reg._listeners)
     coordinator.add_health_listener(s._handle_health_update)
     coordinator.add_bus_stats_listener(s._handle_bus_stats)
-    assert len(coordinator._health_listeners) == before_health + 1
-    assert len(coordinator._bus_stats_listeners) == before_bus + 1
+    assert len(coordinator._health_reg._listeners) == before_health + 1
+    assert len(coordinator._bus_stats_reg._listeners) == before_bus + 1
     coordinator.remove_health_listener(s._handle_health_update)
     coordinator.remove_bus_stats_listener(s._handle_bus_stats)
-    assert len(coordinator._health_listeners) == before_health
-    assert len(coordinator._bus_stats_listeners) == before_bus
+    assert len(coordinator._health_reg._listeners) == before_health
+    assert len(coordinator._bus_stats_reg._listeners) == before_bus
 
 
 def test_bus_load_returns_zero_when_api_offline(coordinator, mock_entry):

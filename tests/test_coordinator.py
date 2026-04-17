@@ -60,14 +60,14 @@ def test_remove_reading_listener_missing_is_safe(coordinator):
 def test_add_health_listener(coordinator):
     cb = MagicMock()
     coordinator.add_health_listener(cb)
-    assert cb in coordinator._health_listeners
+    assert cb in coordinator._health_reg._listeners
 
 
 def test_remove_health_listener(coordinator):
     cb = MagicMock()
     coordinator.add_health_listener(cb)
     coordinator.remove_health_listener(cb)
-    assert cb not in coordinator._health_listeners
+    assert cb not in coordinator._health_reg._listeners
 
 
 def test_notify_health_listeners_called(coordinator):
@@ -452,7 +452,7 @@ def test_add_connection_listener_stores_callback(coordinator):
     """add_connection_listener appends callback to _connection_listeners."""
     cb = MagicMock()
     coordinator.add_connection_listener(cb)
-    assert cb in coordinator._connection_listeners
+    assert cb in coordinator._connection_reg._listeners
 
 
 def test_remove_connection_listener_removes_callback(coordinator):
@@ -460,7 +460,7 @@ def test_remove_connection_listener_removes_callback(coordinator):
     cb = MagicMock()
     coordinator.add_connection_listener(cb)
     coordinator.remove_connection_listener(cb)
-    assert cb not in coordinator._connection_listeners
+    assert cb not in coordinator._connection_reg._listeners
 
 
 def test_remove_connection_listener_missing_is_safe(coordinator):
