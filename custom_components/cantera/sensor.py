@@ -83,6 +83,9 @@ async def async_setup_entry(
         CanteraPiApiVersionSensor(coordinator, entry),
         CanteraExpectedApiVersionSensor(coordinator, entry),
         CanteraBusLoadSensor(coordinator, entry),
+        CanteraWifiSsidSensor(coordinator, entry),
+        CanteraWifiRssiSensor(coordinator, entry),
+        CanteraLocalIpSensor(coordinator, entry),
         *pid_sensors,
     ]
     async_add_entities(entities)
@@ -621,3 +624,112 @@ class CanteraBusLoadSensor(SensorEntity):
             self._bus_load_pct = float(pct)
             self._bus_load_estimated = bool(estimated) if estimated is not None else None
             self.async_write_ha_state()
+
+
+# ---------------------------------------------------------------------------
+# Wi-Fi sensors
+# ---------------------------------------------------------------------------
+
+
+class _CanteraWifiBaseSensor(RestoreSensor):
+    """Base class for Wi-Fi diagnostic sensors.
+
+    Caches the last known value so it persists across Pi reboots and HA
+    restarts.  The cached value is preserved while the API is offline.
+    When the Pi reports a ``None`` value for the field the cache is cleared.
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_should_poll = False
+
+    # Subclasses must define:
+    #   _health_field: str  — key in the /api/health JSON response
+    _health_field: str
+
+    def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry) -> None:
+        super().__init__()
+        self._coordinator = coordinator
+        self._cached_value: str | int | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore persisted value and register health listener."""
+        await super().async_added_to_hass()
+        if (last := await self.async_get_last_sensor_data()) is not None:
+            if last.native_value is not None:
+                self._cached_value = last.native_value
+        self._coordinator.add_health_listener(self._handle_health_update)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unregister health listener."""
+        self._coordinator.remove_health_listener(self._handle_health_update)
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return self._coordinator.device_info
+
+    @property
+    def native_value(self) -> str | int | None:
+        return self._cached_value
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @callback
+    def _handle_health_update(self, health_data: dict) -> None:
+        """Update cache from the /api/health response.
+
+        When the Pi is offline ``health_data`` is ``{}``, so ``get`` returns
+        ``None`` and the sentinel ``_MISSING`` distinguishes "key absent"
+        (API offline — keep cache) from "key present but None" (Pi online,
+        field genuinely unavailable — clear cache).
+        """
+        _MISSING = object()
+        value = health_data.get(self._health_field, _MISSING)
+        if value is not _MISSING:
+            self._cached_value = value  # may be None (clears cache)
+        self.async_write_ha_state()
+
+
+class CanteraWifiSsidSensor(_CanteraWifiBaseSensor):
+    """Shows the SSID of the Wi-Fi network the Pi is connected to."""
+
+    _attr_name = "Wi-Fi SSID"
+    _attr_icon = "mdi:wifi"
+    _health_field = "wifi_ssid"
+
+    def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_wifi_ssid"
+
+
+class CanteraWifiRssiSensor(_CanteraWifiBaseSensor):
+    """Shows the Wi-Fi signal strength of the Pi's wireless connection in dBm."""
+
+    _attr_name = "Wi-Fi Signal Strength"
+    _attr_native_unit_of_measurement = "dBm"
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:wifi-strength-2"
+    _health_field = "wifi_rssi_dbm"
+
+    def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_wifi_rssi_dbm"
+
+
+class CanteraLocalIpSensor(_CanteraWifiBaseSensor):
+    """Shows the local IPv4 address of the Pi's wireless interface.
+
+    This is the LAN address (e.g. ``192.168.x.x``), not a Tailscale or
+    loopback address.
+    """
+
+    _attr_name = "Local IP Address"
+    _attr_icon = "mdi:ip-network"
+    _health_field = "local_ip"
+
+    def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_local_ip"

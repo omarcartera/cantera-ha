@@ -82,6 +82,14 @@ EXPECTED_API_VERSION_MAJOR = 1
 #   minor 4 — vin, calibration_id, cvn optional fields in /api/health;
 #             Mode 09 sensors now populated via health poll.
 MIN_API_VERSION_MINOR = 4
+# History:
+#   minor 2 — bus_load_pct in obd_reading events (spec 053)
+#   minor 3 — can_signal SSE event, mode field in /api/health, /api/logs
+#             endpoints (spec 054 Android target). HA integration does not
+#             consume these additions.
+#   minor 4 — vin, calibration_id, cvn optional fields in /api/health;
+#             Mode 09 sensors now populated via health poll.
+#   minor 5 — wifi_ssid, wifi_rssi_dbm, local_ip optional fields in /api/health.
 SYNC_STALE_THRESHOLD_S = 30  # seconds before a reading timestamp is considered stale
 # How long car-off condition must persist before sync_status flips to "car_off".
 # This prevents rapid oscillation when the ECU briefly stops responding between

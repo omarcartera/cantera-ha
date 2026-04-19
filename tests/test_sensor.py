@@ -180,8 +180,10 @@ async def test_async_setup_entry_creates_all_pid_sensors(hass, mock_entry, coord
     await async_setup_entry(hass, mock_entry, add_entities)
 
     expected_count = (
-        # sync_status + firmware_version + firmware_update_status + pi_api_version + expected_api_version + bus_load + mode01 + mode09
-        1 + 1 + 1 + 1 + 1 + 1 + len(MODE01_PIDS) + len(MODE09_PIDS)
+        # sync_status + firmware_version + firmware_update_status + pi_api_version
+        # + expected_api_version + bus_load + wifi_ssid + wifi_rssi + local_ip
+        # + mode01 + mode09
+        1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + len(MODE01_PIDS) + len(MODE09_PIDS)
     )
     assert len(added) == expected_count
 
@@ -1383,3 +1385,115 @@ def test_bus_load_write_ha_state_called_even_when_pct_is_none(bus_load_sensor):
     bus_load_sensor._handle_health_update({"can_connected": True})
     bus_load_sensor.async_write_ha_state.assert_called()
 
+
+
+# ---------------------------------------------------------------------------
+# Wi-Fi sensors
+# ---------------------------------------------------------------------------
+
+from custom_components.cantera.sensor import (
+    CanteraWifiSsidSensor,
+    CanteraWifiRssiSensor,
+    CanteraLocalIpSensor,
+)
+
+
+@pytest.fixture
+def wifi_ssid_sensor(coordinator, mock_entry):
+    s = CanteraWifiSsidSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+    return s
+
+
+@pytest.fixture
+def wifi_rssi_sensor(coordinator, mock_entry):
+    s = CanteraWifiRssiSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+    return s
+
+
+@pytest.fixture
+def local_ip_sensor(coordinator, mock_entry):
+    s = CanteraLocalIpSensor(coordinator, mock_entry)
+    s.async_write_ha_state = MagicMock()
+    return s
+
+
+def test_wifi_ssid_sensor_unique_id(wifi_ssid_sensor, mock_entry):
+    assert wifi_ssid_sensor._attr_unique_id == f"{mock_entry.entry_id}_wifi_ssid"
+
+
+def test_wifi_rssi_sensor_unique_id(wifi_rssi_sensor, mock_entry):
+    assert wifi_rssi_sensor._attr_unique_id == f"{mock_entry.entry_id}_wifi_rssi_dbm"
+
+
+def test_local_ip_sensor_unique_id(local_ip_sensor, mock_entry):
+    assert local_ip_sensor._attr_unique_id == f"{mock_entry.entry_id}_local_ip"
+
+
+def test_wifi_ssid_sensor_name(wifi_ssid_sensor):
+    assert wifi_ssid_sensor._attr_name == "Wi-Fi SSID"
+
+
+def test_wifi_rssi_sensor_name(wifi_rssi_sensor):
+    assert wifi_rssi_sensor._attr_name == "Wi-Fi Signal Strength"
+
+
+def test_local_ip_sensor_name(local_ip_sensor):
+    assert local_ip_sensor._attr_name == "Local IP Address"
+
+
+def test_wifi_rssi_sensor_unit(wifi_rssi_sensor):
+    assert wifi_rssi_sensor._attr_native_unit_of_measurement == "dBm"
+
+
+def test_wifi_rssi_device_class(wifi_rssi_sensor):
+    from homeassistant.components.sensor import SensorDeviceClass
+    assert wifi_rssi_sensor._attr_device_class == SensorDeviceClass.SIGNAL_STRENGTH
+
+
+def test_wifi_sensors_are_diagnostic(wifi_ssid_sensor, wifi_rssi_sensor, local_ip_sensor):
+    from homeassistant.helpers.entity import EntityCategory
+    for s in (wifi_ssid_sensor, wifi_rssi_sensor, local_ip_sensor):
+        assert s._attr_entity_category == EntityCategory.DIAGNOSTIC
+
+
+def test_wifi_ssid_initial_value_is_none(wifi_ssid_sensor):
+    assert wifi_ssid_sensor.native_value is None
+
+
+def test_wifi_ssid_updates_on_health_data(wifi_ssid_sensor):
+    """Cache is populated from health data when field is present."""
+    wifi_ssid_sensor._handle_health_update({"wifi_ssid": "MyNetwork"})
+    assert wifi_ssid_sensor.native_value == "MyNetwork"
+    wifi_ssid_sensor.async_write_ha_state.assert_called()
+
+
+def test_wifi_rssi_updates_on_health_data(wifi_rssi_sensor):
+    wifi_rssi_sensor._handle_health_update({"wifi_rssi_dbm": -62})
+    assert wifi_rssi_sensor.native_value == -62
+
+
+def test_local_ip_updates_on_health_data(local_ip_sensor):
+    local_ip_sensor._handle_health_update({"local_ip": "192.168.1.42"})
+    assert local_ip_sensor.native_value == "192.168.1.42"
+
+
+def test_wifi_ssid_preserves_cache_when_api_offline(wifi_ssid_sensor):
+    """When API is offline (empty health_data), last known value is preserved."""
+    wifi_ssid_sensor._handle_health_update({"wifi_ssid": "HomeNet"})
+    wifi_ssid_sensor._handle_health_update({})  # API offline
+    assert wifi_ssid_sensor.native_value == "HomeNet"
+
+
+def test_wifi_ssid_clears_cache_when_field_is_none(wifi_ssid_sensor):
+    """When the Pi reports null for the field, the cache is cleared."""
+    wifi_ssid_sensor._handle_health_update({"wifi_ssid": "HomeNet"})
+    wifi_ssid_sensor._handle_health_update({"wifi_ssid": None})
+    assert wifi_ssid_sensor.native_value is None
+
+
+def test_wifi_sensors_available_always_true(wifi_ssid_sensor, wifi_rssi_sensor, local_ip_sensor):
+    """Wi-Fi sensors remain available even when the Pi is offline."""
+    for s in (wifi_ssid_sensor, wifi_rssi_sensor, local_ip_sensor):
+        assert s.available is True
