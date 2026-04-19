@@ -371,9 +371,11 @@ class CanteraCoordinator:
         health poll, before notifying listeners so that ``sync_status`` is
         already correct when callbacks read it.
 
-        The timer only starts once we have confirmed at least one live reading
-        so that startup and post-outage reconnect windows are not falsely
-        reported as "live" during the debounce window.
+        If the condition is live: clear the timer (keep / return to "live").
+        If not live and we *have* been live before: start the normal debounce
+        window (``car_off_debounce_s``) so brief ECU gaps don't flicker.
+        If not live and we have *never* been live: report ``car_off``
+        immediately by back-dating the timer past the debounce threshold.
         """
         connected = self._health_data.get("can_connected", False)
         last_ms: int = self._health_data.get("last_reading_ms", 0)
@@ -387,9 +389,13 @@ class CanteraCoordinator:
         if is_live:
             self._was_ever_live = True
             self._car_off_since_mono = None
-        elif self._was_ever_live and self._car_off_since_mono is None:
-            # Only start debounce after we've observed live data at least once.
-            self._car_off_since_mono = time.monotonic()
+        elif self._car_off_since_mono is None:
+            if self._was_ever_live:
+                # Normal debounce: brief gaps (ECU keep-alive) stay "live".
+                self._car_off_since_mono = time.monotonic()
+            else:
+                # Never been live — report car_off immediately, no debounce.
+                self._car_off_since_mono = time.monotonic() - self.car_off_debounce_s
 
     # ------------------------------------------------------------------
     # Lifecycle

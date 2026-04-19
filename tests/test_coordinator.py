@@ -1,10 +1,11 @@
 """Tests for CanteraCoordinator."""
 import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.cantera.const import CONF_HOST, CONF_PORT
+from custom_components.cantera.const import CONF_HOST, CONF_PORT, SYNC_STATUS_CAR_OFF
 from custom_components.cantera.coordinator import CanteraCoordinator
 
 
@@ -526,6 +527,27 @@ def test_update_car_off_debounce_starts_timer_when_was_ever_live(coordinator):
     coordinator._update_car_off_debounce()
     assert coordinator._car_off_since_mono is not None
 
+
+def test_update_car_off_debounce_never_live_sets_timer_in_past(coordinator):
+    """When never live, timer is backdated so sync_status is immediately car_off."""
+    coordinator._was_ever_live = False
+    coordinator._car_off_since_mono = None
+    coordinator._health_data = {"can_connected": False, "last_reading_ms": 0}
+    coordinator._update_car_off_debounce()
+    assert coordinator._car_off_since_mono is not None
+    elapsed = time.monotonic() - coordinator._car_off_since_mono
+    assert elapsed >= coordinator.car_off_debounce_s
+
+
+def test_sync_status_car_off_when_can_never_connected(coordinator):
+    """sync_status is 'car_off' from first health poll when CAN is never connected."""
+    coordinator._api_reachable = True
+    coordinator._api_compatible = True
+    coordinator._backfilling = False
+    coordinator._was_ever_live = False
+    coordinator._health_data = {"can_connected": False, "last_reading_ms": 0}
+    coordinator._update_car_off_debounce()
+    assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
 
 # ---------- _sse_loop backoff reset (line 316) ----------
 

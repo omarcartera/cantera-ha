@@ -484,13 +484,15 @@ def test_native_value_zero_api_offline_no_reading_ever(sensor, coordinator):
 
 # ---------- coordinator debounce fixes ----------
 
-def test_car_off_timer_not_started_before_ever_live(coordinator):
-    """Debounce timer stays None at startup (never seen live) — no false 'live' window."""
+def test_car_off_timer_set_immediately_when_never_live(coordinator):
+    """When CAN was never connected, timer is backdated so sync_status is immediately car_off."""
     coordinator._api_reachable = True
     coordinator._health_data = {"can_connected": False, "last_reading_ms": 0}
     coordinator._update_car_off_debounce()
-    # _was_ever_live is False → timer should NOT start
-    assert coordinator._car_off_since_mono is None
+    # _was_ever_live is False → timer IS set, back-dated past the debounce threshold
+    assert coordinator._car_off_since_mono is not None
+    elapsed = time.monotonic() - coordinator._car_off_since_mono
+    assert elapsed >= coordinator.car_off_debounce_s
 
 
 def test_car_off_timer_cleared_on_api_failure(coordinator):

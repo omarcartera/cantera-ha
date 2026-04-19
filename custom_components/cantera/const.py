@@ -81,7 +81,7 @@ EXPECTED_API_VERSION_MAJOR = 1
 #             consume these additions.
 #   minor 4 — vin, calibration_id, cvn optional fields in /api/health;
 #             Mode 09 sensors now populated via health poll.
-MIN_API_VERSION_MINOR = 4
+MIN_API_VERSION_MINOR = 5
 # History:
 #   minor 2 — bus_load_pct in obd_reading events (spec 053)
 #   minor 3 — can_signal SSE event, mode field in /api/health, /api/logs
