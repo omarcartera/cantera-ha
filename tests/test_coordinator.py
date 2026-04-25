@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.cantera.const import CONF_HOST, CONF_PORT, SYNC_STATUS_CAR_OFF
+from custom_components.cantera.const import CONF_HOST, CONF_PORT, SYNC_STATUS_CAR_OFF, SYNC_STATUS_LIVE, SYNC_STATUS_SYNCING
 from custom_components.cantera.coordinator import CanteraCoordinator
 
 
@@ -894,3 +894,47 @@ async def test_incompatible_api_version_cancels_sse_task(hass, mock_entry):
     # The original task must have been cancelled.  Yield to let it process.
     await asyncio.sleep(0)
     assert fake_sse_task.cancelled()
+
+
+# ---------- RPi-owned sync_status (API minor >= 6) ----------
+
+def test_sync_status_trusts_pi_live(coordinator):
+    """When health data contains sync_status='live', return it directly."""
+    coordinator._api_reachable = True
+    coordinator._api_compatible = True
+    coordinator._health_data = {"sync_status": "live"}
+    assert coordinator.sync_status == SYNC_STATUS_LIVE
+
+
+def test_sync_status_trusts_pi_car_off(coordinator):
+    """When health data contains sync_status='car_off', return it directly."""
+    coordinator._api_reachable = True
+    coordinator._api_compatible = True
+    coordinator._health_data = {"sync_status": "car_off"}
+    assert coordinator.sync_status == SYNC_STATUS_CAR_OFF
+
+
+def test_sync_status_trusts_pi_syncing(coordinator):
+    """When health data contains sync_status='syncing', return it directly."""
+    coordinator._api_reachable = True
+    coordinator._api_compatible = True
+    coordinator._health_data = {"sync_status": "syncing"}
+    assert coordinator.sync_status == SYNC_STATUS_SYNCING
+
+
+def test_sync_status_pi_overrides_backfilling(coordinator):
+    """RPi sync_status takes priority over HA _backfilling."""
+    coordinator._api_reachable = True
+    coordinator._api_compatible = True
+    coordinator._backfilling = True
+    coordinator._health_data = {"sync_status": "live"}
+    assert coordinator.sync_status == SYNC_STATUS_LIVE
+
+
+def test_sync_status_fallback_when_pi_field_missing(coordinator):
+    """Legacy fallback (backfilling → syncing) when sync_status is absent."""
+    coordinator._api_reachable = True
+    coordinator._api_compatible = True
+    coordinator._backfilling = True
+    coordinator._health_data = {}
+    assert coordinator.sync_status == SYNC_STATUS_SYNCING

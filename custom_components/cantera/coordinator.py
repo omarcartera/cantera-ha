@@ -241,22 +241,34 @@ class CanteraCoordinator:
         States (in priority order):
         - ``incompatible``: Pi API major version does not match integration.
         - ``api_offline``: /api/health is unreachable (Pi is down / no network).
-        - ``syncing``:     API reachable, history backfill is in progress.
-        - ``car_off``:     API reachable, CAN not connected or readings stale,
-                           AND the car-off condition has persisted for at least
-                           ``car_off_debounce_s`` seconds.
-        - ``live``:        API reachable, CAN connected, recent reading (<30 s),
-                           or still within the car-off debounce window.
+        - ``syncing``:     API reachable, RPi reports syncing.
+        - ``car_off``:     API reachable, RPi reports car_off.
+        - ``live``:        API reachable, RPi reports live.
+
+        Since API minor version 6 the RPi owns ``syncing``, ``live``, and
+        ``car_off`` via the ``sync_status`` field in ``/api/health``.  For
+        older firmware we fall back to the legacy heuristic (backfill →
+        syncing, car-off debounce from ``can_connected`` / ``last_reading_ms``).
         """
         if self._api_compatible is False:
             return SYNC_STATUS_INCOMPATIBLE
         if not self._api_reachable:
             return SYNC_STATUS_API_OFFLINE
+
+        # Trust RPi-owned status when available (API minor >= 6).
+        pi_status = self._health_data.get("sync_status")
+        if pi_status is not None:
+            if pi_status == "syncing":
+                return SYNC_STATUS_SYNCING
+            if pi_status == "live":
+                return SYNC_STATUS_LIVE
+            if pi_status == "car_off":
+                return SYNC_STATUS_CAR_OFF
+            # Unknown value — fall through to legacy logic.
+
+        # Legacy fallback for firmware that does not report sync_status.
         if self._backfilling:
             return SYNC_STATUS_SYNCING
-        # Declare car_off only after the condition has persisted long enough.
-        # This prevents the sensor from flickering when the ECU briefly stops
-        # responding between OBD poll cycles but quickly comes back.
         if (
             self._car_off_since_mono is not None
             and time.monotonic() - self._car_off_since_mono >= self.car_off_debounce_s
@@ -459,7 +471,10 @@ class CanteraCoordinator:
                             # instead of waiting out the current backoff sleep.
                             self._sse_wake.set()
                         self._first_health_received = True
-                        self._update_car_off_debounce()
+                        # Only run legacy car-off debounce when the Pi does not
+                        # own sync_status (firmware < API minor 6).
+                        if self._health_data.get("sync_status") is None:
+                            self._update_car_off_debounce()
                         # Propagate firmware update status on every health poll
                         # (every 5 s) rather than waiting for the hourly scan.
                         fw_status = self._health_data.get("firmware_update_status")

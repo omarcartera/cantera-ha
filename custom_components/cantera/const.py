@@ -81,7 +81,9 @@ EXPECTED_API_VERSION_MAJOR = 1
 #             consume these additions.
 #   minor 4 — vin, calibration_id, cvn optional fields in /api/health;
 #             Mode 09 sensors now populated via health poll.
-MIN_API_VERSION_MINOR = 5
+#   minor 5 — wifi_ssid, wifi_rssi_dbm, local_ip optional fields in /api/health.
+#   minor 6 — sync_status field in /api/health; RPi owns live/car_off/syncing.
+MIN_API_VERSION_MINOR = 6
 # History:
 #   minor 2 — bus_load_pct in obd_reading events (spec 053)
 #   minor 3 — can_signal SSE event, mode field in /api/health, /api/logs
@@ -90,11 +92,12 @@ MIN_API_VERSION_MINOR = 5
 #   minor 4 — vin, calibration_id, cvn optional fields in /api/health;
 #             Mode 09 sensors now populated via health poll.
 #   minor 5 — wifi_ssid, wifi_rssi_dbm, local_ip optional fields in /api/health.
+#   minor 6 — sync_status field in /api/health; RPi owns live/car_off/syncing.
 SYNC_STALE_THRESHOLD_S = 30  # seconds before a reading timestamp is considered stale
 # How long car-off condition must persist before sync_status flips to "car_off".
 # This prevents rapid oscillation when the ECU briefly stops responding between
 # successful OBD poll cycles (e.g. during ECU keep-alive retries).
-SYNC_CAR_OFF_DEBOUNCE_S = 5
+SYNC_CAR_OFF_DEBOUNCE_S = 30
 # How long to show last-known values during an API outage before zeroing sensors.
 # A brief Pi reboot (~30-60 s) should not cause cards to blank out.
 SENSOR_API_OFFLINE_GRACE_S = 60
