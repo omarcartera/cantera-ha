@@ -68,8 +68,11 @@ Any code that tests connectivity to the CANtera API MUST use `/api/health` — *
 
 ## LAW 4 — Branch & Commit Discipline
 
+- **Start from `main`**: Before any task, run `git checkout main && git pull`.
 - Create a feature branch BEFORE writing any code. No commits to `main` directly.
 - Branch naming: `feature/<description>`.
+- Chain branches: the first branch in a batch is based on `main`; every subsequent branch MUST be based on the previous feature branch (see LAW 1).
+- **Commit when done**: A task is not done until all changes are committed on the feature branch with a clear, present-tense message summarising *what* changed and *why*.
 - Every commit co-authored by agents MUST include:  
   `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`
 - Rebase (not merge) onto the previous branch before PR.
