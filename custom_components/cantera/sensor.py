@@ -158,7 +158,7 @@ class CanteraSensor(RestoreSensor):
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"cantera_vehicle_{entry_id}")},
-            name="CANtera Vehicle",
+            name=f"CANtera Vehicle ({coordinator._host})",
             manufacturer=DEVICE_MANUFACTURER,
             model=DEVICE_MODEL,
         )
@@ -299,7 +299,7 @@ class CanteraSyncStatusSensor(SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_sync_status"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"cantera_vehicle_{entry_id}")},
-            name="CANtera Vehicle",
+            name=f"CANtera Vehicle ({coordinator._host})",
             manufacturer=DEVICE_MANUFACTURER,
             model=DEVICE_MODEL,
         )

@@ -136,9 +136,14 @@ class CanteraUpdateEntity(UpdateEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
+        # Resolve host from hass.data so the device name is consistent with
+        # sensor.py and coordinator.py even though this entity does not hold
+        # a coordinator reference.
+        entry_data = self._hass.config_entries.async_get_entry(self._entry_id)
+        host = entry_data.data.get("host", "") if entry_data else ""
         return DeviceInfo(
             identifiers={(DOMAIN, f"cantera_vehicle_{self._entry_id}")},
-            name="CANtera OBD-II",
+            name=f"CANtera Vehicle ({host})",
             manufacturer=DEVICE_MANUFACTURER,
             model=DEVICE_MODEL,
         )

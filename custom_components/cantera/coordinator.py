@@ -224,7 +224,7 @@ class CanteraCoordinator:
         """Shared device info so all CANtera entities group under one device."""
         return DeviceInfo(
             identifiers={(DOMAIN, f"cantera_vehicle_{self._entry_id}")},
-            name="CANtera Vehicle",
+            name=f"CANtera Vehicle ({self._host})",
             manufacturer=DEVICE_MANUFACTURER,
             model=DEVICE_MODEL,
         )
@@ -573,7 +573,7 @@ class CanteraCoordinator:
                                 "Update both Pi firmware and HA integration to "
                                 "matching versions."
                             ),
-                            "notification_id": "cantera_api_incompatible",
+                            "notification_id": f"cantera_api_incompatible_{self._entry_id}",
                         },
                     )
                 except Exception:
@@ -587,7 +587,7 @@ class CanteraCoordinator:
                 await self._hass.services.async_call(
                     "persistent_notification",
                     "dismiss",
-                    {"notification_id": "cantera_api_incompatible"},
+                    {"notification_id": f"cantera_api_incompatible_{self._entry_id}"},
                 )
             except Exception:
                 _LOGGER.debug("Failed to dismiss API incompatibility notification")
