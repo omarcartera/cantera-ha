@@ -301,24 +301,13 @@ class CanteraUpdateEntity(UpdateEntity):
             await self._download_and_install(zipball_url, install_dir)
 
             # Update in-memory version so the entity reflects the change
-            # immediately. The config-entry reload below recreates all entities
-            # — no full HA restart is required or triggered.
+            # immediately. A full HA restart is required for Python to reimport
+            # the updated modules; we do NOT call config_entries.async_reload
+            # because it does not reimport bytecode.
             self._installed_version = target
             _LOGGER.info(
                 "CANtera integration v%s installed; restart Home Assistant to activate",
                 target,
-            )
-            await self._hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": "CANtera Update Installed",
-                    "message": (
-                        f"CANtera has been updated to **v{target}**. "
-                        "Please restart Home Assistant to activate the new code."
-                    ),
-                    "notification_id": "cantera_update_restart_required",
-                },
             )
 
         except Exception:

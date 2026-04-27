@@ -321,11 +321,14 @@ async def test_async_install_updates_installed_version(entity):
     assert entity.installed_version == "0.2.0"
 
 
-async def test_async_install_shows_restart_notification(entity):
-    """After successful install, a persistent_notification is created and the
-    version is embedded in its message. config_entries.async_reload must NOT
-    be called — it does not reimport Python modules and gives a false
-    impression of success."""
+async def test_async_install_does_not_create_custom_notification(entity):
+    """After successful install, NO custom persistent_notification is created.
+
+    Home Assistant already shows a 'Restart required' indicator when
+    custom_components files change, so our own notification was duplicate.
+    config_entries.async_reload must NOT be called — it does not reimport
+    Python modules and gives a false impression of success.
+    """
     entity._releases = FAKE_RELEASES
 
     with (
@@ -335,12 +338,9 @@ async def test_async_install_shows_restart_notification(entity):
     ):
         await entity.async_install("0.3.0", False)
 
-    mock_svc.assert_awaited_once()
-    domain, service, payload = mock_svc.call_args[0]
-    assert domain == "persistent_notification"
-    assert service == "create"
-    assert "0.3.0" in payload["message"]
-    assert payload["notification_id"] == "cantera_update_restart_required"
+    # No persistent_notification.create call from our code.
+    for call in mock_svc.call_args_list:
+        assert call[0][0] != "persistent_notification"
     mock_reload.assert_not_awaited()
 
 
