@@ -89,6 +89,9 @@ async def async_setup_entry(
         CanteraWifiSsidSensor(coordinator, entry),
         CanteraWifiRssiSensor(coordinator, entry),
         CanteraLocalIpSensor(coordinator, entry),
+        CanteraCpuTempSensor(coordinator, entry),
+        CanteraDiskUsageSensor(coordinator, entry),
+        CanteraThrottledFlagsSensor(coordinator, entry),
         *pid_sensors,
     ]
     async_add_entities(entities)
@@ -735,3 +738,55 @@ class CanteraLocalIpSensor(_CanteraWifiBaseSensor):
     def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_local_ip"
+
+
+# ---------------------------------------------------------------------------
+# RPi hardware health sensors
+# ---------------------------------------------------------------------------
+
+
+class CanteraCpuTempSensor(_CanteraWifiBaseSensor):
+    """Shows the CPU temperature of the Raspberry Pi in °C."""
+
+    _attr_name = "CPU Temperature"
+    _attr_native_unit_of_measurement = "°C"
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
+    _attr_icon = "mdi:thermometer"
+    _health_field = "cpu_temp_c"
+
+    def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_cpu_temp_c"
+
+
+class CanteraDiskUsageSensor(_CanteraWifiBaseSensor):
+    """Shows the disk usage percentage of the Pi's log partition."""
+
+    _attr_name = "Disk Usage"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
+    _attr_icon = "mdi:harddisk"
+    _health_field = "disk_usage_pct"
+
+    def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_disk_usage_pct"
+
+
+class CanteraThrottledFlagsSensor(_CanteraWifiBaseSensor):
+    """Shows the Pi under-voltage / throttling flags from vcgencmd.
+
+    A hex string such as ``0x0`` (no throttling) or ``0x50005`` (under-voltage
+    occurred and currently active).  ``None`` when the tool is unavailable.
+    """
+
+    _attr_name = "Throttled Flags"
+    _attr_icon = "mdi:alert-circle-outline"
+    _health_field = "throttled_flags"
+
+    def __init__(self, coordinator: CanteraCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_throttled_flags"

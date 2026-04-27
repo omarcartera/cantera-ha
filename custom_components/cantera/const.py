@@ -85,7 +85,9 @@ EXPECTED_API_VERSION_MAJOR = 1
 #   minor 6 — sync_status field in /api/health; RPi owns live/car_off/syncing.
 #   minor 7 — limit/offset pagination on /api/history; capped page sizes;
 #             HTTP gzip compression support.
-MIN_API_VERSION_MINOR = 7
+#   minor 8 — cpu_temp_c, disk_usage_pct, throttled_flags optional fields
+#             in /api/health; new /metrics Prometheus endpoint.
+MIN_API_VERSION_MINOR = 8
 #   minor 5 — wifi_ssid, wifi_rssi_dbm, local_ip optional fields in /api/health.
 #   minor 6 — sync_status field in /api/health; RPi owns live/car_off/syncing.
 SYNC_STALE_THRESHOLD_S = 30  # seconds before a reading timestamp is considered stale

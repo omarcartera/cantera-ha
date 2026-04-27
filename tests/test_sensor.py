@@ -182,8 +182,8 @@ async def test_async_setup_entry_creates_all_pid_sensors(hass, mock_entry, coord
     expected_count = (
         # sync_status + firmware_version + firmware_update_status + pi_api_version
         # + expected_api_version + bus_load + wifi_ssid + wifi_rssi + local_ip
-        # + mode01 + mode09
-        1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + len(MODE01_PIDS) + len(MODE09_PIDS)
+        # + cpu_temp + disk_usage + throttled_flags + mode01 + mode09
+        1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + len(MODE01_PIDS) + len(MODE09_PIDS)
     )
     assert len(added) == expected_count
 
