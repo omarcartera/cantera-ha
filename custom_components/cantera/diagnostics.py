@@ -9,7 +9,15 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_HOST, CONF_PORT
 
-_REDACT_KEYS: frozenset[str] = frozenset({CONF_HOST, CONF_PORT})
+_REDACT_KEYS: frozenset[str] = frozenset({
+    CONF_HOST,
+    CONF_PORT,
+    "vin",
+    "wifi_ssid",
+    "local_ip",
+    "calibration_id",
+    "cvn",
+})
 
 
 async def async_get_config_entry_diagnostics(
@@ -37,5 +45,7 @@ async def async_get_config_entry_diagnostics(
         "firmware": {
             "update_state": coordinator.firmware_update_state,
         },
-        "health_data": coordinator.health_data,
+        "health_data": async_redact_data(
+            dict(coordinator.health_data), _REDACT_KEYS
+        ),
     }

@@ -18,7 +18,15 @@ def mock_coordinator():
     coord._consecutive_health_failures = 0
     coord._backfilling = False
     coord.firmware_update_state = "up_to_date"
-    coord.health_data = {"can_connected": True, "version": "0.3.0"}
+    coord.health_data = {
+        "can_connected": True,
+        "version": "0.3.0",
+        "vin": "1HGCM82633A123456",
+        "wifi_ssid": "MyHomeNetwork",
+        "local_ip": "192.168.1.50",
+        "calibration_id": "CAL123",
+        "cvn": "CVN456",
+    }
     return coord
 
 
@@ -56,10 +64,17 @@ async def test_diagnostics_includes_operational_fields(hass, mock_entry, mock_co
     assert result["firmware"]["update_state"] == "up_to_date"
 
 
-async def test_diagnostics_returns_health_data(hass, mock_entry, mock_coordinator):
-    """health_data from coordinator is included."""
+async def test_diagnostics_redacts_sensitive_health_data(hass, mock_entry, mock_coordinator):
+    """Sensitive health_data fields (VIN, Wi-Fi, IP, CalID, CVN) are redacted."""
     result = await async_get_config_entry_diagnostics(hass, mock_entry)
-    assert result["health_data"] == {"can_connected": True, "version": "0.3.0"}
+    health = result["health_data"]
+    assert health["can_connected"] is True
+    assert health["version"] == "0.3.0"
+    assert health["vin"] == "**REDACTED**"
+    assert health["wifi_ssid"] == "**REDACTED**"
+    assert health["local_ip"] == "**REDACTED**"
+    assert health["calibration_id"] == "**REDACTED**"
+    assert health["cvn"] == "**REDACTED**"
 
 
 async def test_diagnostics_disconnected_coordinator(hass, mock_entry, mock_coordinator):
