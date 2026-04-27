@@ -762,6 +762,25 @@ class CanteraCoordinator:
                     break
 
                 page_len = len(readings)
+                # Defensive: old servers (< API minor 7) ignore limit/offset and
+                # return the entire time window. Detect this and process the batch
+                # as a single non-paginated response to avoid an infinite loop.
+                if page_len > HISTORY_PAGE_SIZE:
+                    _LOGGER.debug(
+                        "History server returned %d rows (>%d requested); "
+                        "treating as non-paginated response",
+                        page_len,
+                        HISTORY_PAGE_SIZE,
+                    )
+                    total_imported += page_len
+                    for r in readings:
+                        self._pid_units[r["pid"]] = r.get("unit", "")
+                    await import_statistics(
+                        self._hass, readings, self._pid_units, self._entry_id
+                    )
+                    last_imported_ts = max(r["ts"] for r in readings)
+                    break
+
                 total_imported += page_len
                 for r in readings:
                     self._pid_units[r["pid"]] = r.get("unit", "")

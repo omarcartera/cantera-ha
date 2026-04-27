@@ -83,14 +83,9 @@ EXPECTED_API_VERSION_MAJOR = 1
 #             Mode 09 sensors now populated via health poll.
 #   minor 5 — wifi_ssid, wifi_rssi_dbm, local_ip optional fields in /api/health.
 #   minor 6 — sync_status field in /api/health; RPi owns live/car_off/syncing.
-MIN_API_VERSION_MINOR = 6
-# History:
-#   minor 2 — bus_load_pct in obd_reading events (spec 053)
-#   minor 3 — can_signal SSE event, mode field in /api/health, /api/logs
-#             endpoints (spec 054 Android target). HA integration does not
-#             consume these additions.
-#   minor 4 — vin, calibration_id, cvn optional fields in /api/health;
-#             Mode 09 sensors now populated via health poll.
+#   minor 7 — limit/offset pagination on /api/history; capped page sizes;
+#             HTTP gzip compression support.
+MIN_API_VERSION_MINOR = 7
 #   minor 5 — wifi_ssid, wifi_rssi_dbm, local_ip optional fields in /api/health.
 #   minor 6 — sync_status field in /api/health; RPi owns live/car_off/syncing.
 SYNC_STALE_THRESHOLD_S = 30  # seconds before a reading timestamp is considered stale
