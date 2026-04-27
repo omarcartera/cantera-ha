@@ -779,6 +779,7 @@ class CanteraCoordinator:
                         self._hass, readings, self._pid_units, self._entry_id
                     )
                     last_imported_ts = max(r["ts"] for r in readings)
+                    await self._save_last_sync(last_imported_ts)
                     break
 
                 total_imported += page_len
@@ -788,6 +789,7 @@ class CanteraCoordinator:
                     self._hass, readings, self._pid_units, self._entry_id
                 )
                 last_imported_ts = max(r["ts"] for r in readings)
+                await self._save_last_sync(last_imported_ts)
                 offset += page_len
 
                 if page_len < HISTORY_PAGE_SIZE:
@@ -798,7 +800,6 @@ class CanteraCoordinator:
                     "Imported %d historical readings into HA statistics",
                     total_imported,
                 )
-                await self._save_last_sync(last_imported_ts)
         except (TimeoutError, aiohttp.ClientError) as exc:
             # Pi offline or unreachable — expected during startup or when the car
             # is off.  Log at DEBUG so HA logs stay clean.
