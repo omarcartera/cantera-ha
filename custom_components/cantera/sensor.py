@@ -54,6 +54,9 @@ _STATE_CLASS_LOOKUP: dict[str, SensorStateClass] = {
     "total_increasing": SensorStateClass.TOTAL_INCREASING,
 }
 
+# Sentinel used to distinguish "key absent" from "key present but None".
+_MISSING = object()
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -685,7 +688,6 @@ class _CanteraWifiBaseSensor(RestoreSensor):
         (API offline — keep cache) from "key present but None" (Pi online,
         field genuinely unavailable — clear cache).
         """
-        _MISSING = object()
         value = health_data.get(self._health_field, _MISSING)
         if value is not _MISSING:
             self._cached_value = value  # may be None (clears cache)

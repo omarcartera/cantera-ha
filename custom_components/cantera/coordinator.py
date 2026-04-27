@@ -54,6 +54,15 @@ _LOGGER = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
+# Mapping: health field → Mode 09 PID display name (must match const.py).
+# Kept as a module-level constant so it is not re-allocated on every
+# health poll (every 5 s).
+_MODE09_FIELD_MAP: dict[str, str] = {
+    "vin": "Vehicle Identification Number (VIN)",
+    "calibration_id": "Calibration ID (CalID)",
+    "cvn": "Calibration Verification Number (CVN)",
+}
+
 
 class ListenerRegistry(Generic[_T]):
     """Generic fan-out listener list with add, remove, and notify.
@@ -353,14 +362,8 @@ class CanteraCoordinator:
         Notifications are deduplicated: a listener is only called when the
         value has changed since the last delivery.
         """
-        # Mapping: health field → Mode 09 PID display name (must match const.py).
-        field_to_name = {
-            "vin": "Vehicle Identification Number (VIN)",
-            "calibration_id": "Calibration ID (CalID)",
-            "cvn": "Calibration Verification Number (CVN)",
-        }
         now_ms = int(time.time() * 1000)
-        for field, pid_name in field_to_name.items():
+        for field, pid_name in _MODE09_FIELD_MAP.items():
             value = self._health_data.get(field)
             if value is None:
                 continue

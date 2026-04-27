@@ -119,7 +119,7 @@ class CanteraUpdateEntity(UpdateEntity):
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self._hass = hass
         self._entry_id = entry_id
-        self._installed_version: str | None = _read_manifest_version()
+        self._installed_version: str | None = None
         self._latest_version: str | None = None
         self._releases: list[dict] = []
         self._release_notes_cache: str | None = None
@@ -167,6 +167,15 @@ class CanteraUpdateEntity(UpdateEntity):
     @property
     def in_progress(self) -> bool:
         return self._in_progress
+
+    async def async_added_to_hass(self) -> None:
+        """Read manifest version after the entity is added to HA.
+
+        Manifest I/O is deferred from __init__ (which runs on the event loop)
+        to async_added_to_hass so we do not block the coordinator startup.
+        """
+        await super().async_added_to_hass()
+        self._installed_version = await asyncio.to_thread(_read_manifest_version)
 
     # ------------------------------------------------------------------ #
     # Polling                                                               #
@@ -371,36 +380,42 @@ class CanteraUpdateEntity(UpdateEntity):
             _LOGGER.info(
                 "Downloaded CANtera release archive — SHA256: %s", archive_sha256
             )
-            zip_path.write_bytes(zip_bytes)
+            await asyncio.get_running_loop().run_in_executor(
+                None, zip_path.write_bytes, zip_bytes
+            )
 
             extracted = tmp_path / "extracted"
-            extracted.mkdir()
-            extraction_root = extracted.resolve()
-            with zipfile.ZipFile(zip_path) as zf:
-                for member in zf.namelist():
-                    member_path = (extracted / member).resolve()
-                    if not str(member_path).startswith(str(extraction_root)):
-                        raise ValueError(
-                            f"Zip-slip detected: {member!r} would escape extraction dir"
-                        )
-                zf.extractall(extracted)
+            await asyncio.get_running_loop().run_in_executor(
+                None, extracted.mkdir
+            )
+            extraction_root = await asyncio.get_running_loop().run_in_executor(
+                None, extracted.resolve
+            )
 
-            # GitHub archives wrap everything in a top-level directory
-            # (e.g. ``omarcartera-cantera-ha-abc1234/``).  Find the
-            # ``cantera/`` subdirectory anywhere inside the tree.
-            src = None
-            for candidate in extracted.rglob("manifest.json"):
-                if candidate.parent.name == "cantera":
-                    src = candidate.parent
-                    break
-
-            if src is None:
+            def _extract_and_validate() -> Path:
+                with zipfile.ZipFile(zip_path) as zf:
+                    for member in zf.namelist():
+                        member_path = (extracted / member).resolve()
+                        if not str(member_path).startswith(str(extraction_root)):
+                            raise ValueError(
+                                f"Zip-slip detected: {member!r} would escape extraction dir"
+                            )
+                    zf.extractall(extracted)
+                # GitHub archives wrap everything in a top-level directory.
+                # Find the ``cantera/`` subdirectory anywhere inside the tree.
+                for candidate in extracted.rglob("manifest.json"):
+                    if candidate.parent.name == "cantera":
+                        return candidate.parent
                 raise FileNotFoundError(
                     "Cannot locate custom_components/cantera/ inside the release archive"
                 )
 
+            src = await asyncio.get_running_loop().run_in_executor(
+                None, _extract_and_validate
+            )
+
             # Phase 1: copy into staging (any failure here leaves live dir intact).
-            if staging.exists():
+            if await asyncio.get_running_loop().run_in_executor(None, staging.exists):
                 await asyncio.get_running_loop().run_in_executor(
                     None, shutil.rmtree, staging
                 )
@@ -411,13 +426,17 @@ class CanteraUpdateEntity(UpdateEntity):
         # Phase 2: atomic swap (rename within same parent directory).
         # Both renames are near-instantaneous; the window where neither copy
         # exists is essentially zero on Linux.
-        if backup.exists():
+        if await asyncio.get_running_loop().run_in_executor(None, backup.exists):
             await asyncio.get_running_loop().run_in_executor(
                 None, shutil.rmtree, backup
             )
-        if install_dir.exists():
-            install_dir.rename(backup)
-        staging.rename(install_dir)
+        if await asyncio.get_running_loop().run_in_executor(None, install_dir.exists):
+            await asyncio.get_running_loop().run_in_executor(
+                None, install_dir.rename, backup
+            )
+        await asyncio.get_running_loop().run_in_executor(
+            None, staging.rename, install_dir
+        )
         # Remove backup asynchronously — failure here is non-fatal.
         try:
             await asyncio.get_running_loop().run_in_executor(
