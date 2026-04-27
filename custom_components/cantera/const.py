@@ -102,6 +102,10 @@ SYNC_CAR_OFF_DEBOUNCE_S = 30
 # A brief Pi reboot (~30-60 s) should not cause cards to blank out.
 SENSOR_API_OFFLINE_GRACE_S = 60
 
+# Page size for history backfill pagination.
+# Must be ≤ the Rust server's HISTORY_MAX_ROWS (currently 50_000).
+HISTORY_PAGE_SIZE = 10_000
+
 # Unit -> HA device_class mapping
 UNIT_DEVICE_CLASS_MAP = {
     "km/h": "speed",

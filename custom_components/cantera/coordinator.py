@@ -30,6 +30,7 @@ from .const import (
     HEALTH_FAIL_THRESHOLD,
     HEALTH_POLL_INTERVAL_S,
     HISTORY_ENDPOINT,
+    HISTORY_PAGE_SIZE,
     SSE_ENDPOINT,
     SSE_EVENT_TYPE_BUS_STATS,
     SSE_EVENT_TYPE_OBD,
@@ -729,37 +730,55 @@ class CanteraCoordinator:
         """Fetch /api/history for the gap since last sync, import stats.
 
         Uses its own aiohttp session so it can run concurrently with the SSE
-        stream on a separate connection.
+        stream on a separate connection.  Pages through the history in chunks
+        so that a long offline gap does not produce an unbounded single JSON
+        response that exhausts memory on the Pi or HA host.
         """
         self._backfilling = True
         self._notify_health_listeners()
         try:
             last_sync_ms = await self._load_last_sync()
             now_ms = int(datetime.now(UTC).timestamp() * 1000)
-
-            history_url = (
-                f"{self._base_url}{HISTORY_ENDPOINT}"
-                f"?start={last_sync_ms}&end={now_ms}"
-            )
+            offset = 0
+            total_imported = 0
+            last_imported_ts = last_sync_ms
             session = async_get_clientsession(self._hass)
-            async with session.get(
-                history_url, timeout=aiohttp.ClientTimeout(total=30)
-            ) as resp:
-                if resp.status != 200:
-                    _LOGGER.warning("History endpoint returned %d", resp.status)
-                    return
-                readings = await resp.json()
 
-            if readings:
-                _LOGGER.info(
-                    "Importing %d historical readings into HA statistics",
-                    len(readings),
+            while True:
+                history_url = (
+                    f"{self._base_url}{HISTORY_ENDPOINT}"
+                    f"?start={last_sync_ms}&end={now_ms}"
+                    f"&limit={HISTORY_PAGE_SIZE}&offset={offset}"
                 )
+                async with session.get(
+                    history_url, timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status != 200:
+                        _LOGGER.warning("History endpoint returned %d", resp.status)
+                        return
+                    readings = await resp.json()
+
+                if not readings:
+                    break
+
+                page_len = len(readings)
+                total_imported += page_len
                 for r in readings:
                     self._pid_units[r["pid"]] = r.get("unit", "")
-                await import_statistics(self._hass, readings, self._pid_units, self._entry_id)
-
+                await import_statistics(
+                    self._hass, readings, self._pid_units, self._entry_id
+                )
                 last_imported_ts = max(r["ts"] for r in readings)
+                offset += page_len
+
+                if page_len < HISTORY_PAGE_SIZE:
+                    break
+
+            if total_imported:
+                _LOGGER.info(
+                    "Imported %d historical readings into HA statistics",
+                    total_imported,
+                )
                 await self._save_last_sync(last_imported_ts)
         except (TimeoutError, aiohttp.ClientError) as exc:
             # Pi offline or unreachable — expected during startup or when the car
