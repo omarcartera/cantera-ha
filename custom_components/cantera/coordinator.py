@@ -493,6 +493,10 @@ class CanteraCoordinator:
                         _success = True
             except (TimeoutError, aiohttp.ClientError, OSError):
                 _LOGGER.debug("Health poll request failed", exc_info=True)
+            except Exception:
+                # Malformed JSON or unexpected errors must not crash the HA
+                # interval callback — that would permanently stop health polling.
+                _LOGGER.exception("Health poll encountered an unexpected error")
 
             if _success:
                 # Run compatibility check outside the network error handler so
@@ -646,9 +650,11 @@ class CanteraCoordinator:
         unreachable → reachable, which cancels this sleep so the SSE loop
         reconnects without waiting out the remaining backoff window.
         """
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(self._sse_wake.wait(), timeout=seconds)
-        self._sse_wake.clear()
+        try:
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self._sse_wake.wait(), timeout=seconds)
+        finally:
+            self._sse_wake.clear()
 
     async def _connect_and_stream(self) -> None:
         """Start backfill concurrently then stream live SSE data.
