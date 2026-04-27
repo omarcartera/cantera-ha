@@ -94,14 +94,15 @@ async def test_async_unload_entry_failure_does_not_pop_coordinator(hass, mock_en
 
 
 async def test_async_remove_entry_clears_statistics(hass, mock_entry):
-    """async_remove_entry removes external statistics for this domain."""
+    """async_remove_entry removes only external statistics scoped to this entry."""
     from unittest.mock import AsyncMock, MagicMock, patch
 
     mock_recorder = MagicMock()
     mock_recorder.async_add_executor_job = AsyncMock()
 
     mock_stats = [
-        {"statistic_id": "cantera:engine_rpm", "source": "cantera"},
+        {"statistic_id": f"cantera_{mock_entry.entry_id}:engine_rpm", "source": "cantera"},
+        {"statistic_id": "cantera_other_entry:engine_rpm", "source": "cantera"},
         {"statistic_id": "other:something", "source": "other"},
     ]
 
@@ -119,7 +120,8 @@ async def test_async_remove_entry_clears_statistics(hass, mock_entry):
     mock_recorder.async_add_executor_job.assert_awaited_once()
     args = mock_recorder.async_add_executor_job.call_args[0]
     assert args[0] is mock_clear
-    assert args[2] == ["cantera:engine_rpm"]
+    # Only the entry-scoped statistic is removed; the other entry's data is preserved.
+    assert args[2] == [f"cantera_{mock_entry.entry_id}:engine_rpm"]
 
 
 async def test_async_remove_entry_no_stats_does_not_call_clear(hass, mock_entry):

@@ -116,7 +116,7 @@ async def test_import_statistics_calls_add_external_statistics(hass):
     with patch(
         "custom_components.cantera.ha_statistics.async_add_external_statistics"
     ) as mock_add:
-        await import_statistics(hass, readings, pid_units)
+        await import_statistics(hass, readings, pid_units, "test_entry")
 
     mock_add.assert_called_once()
     _, metadata, stats = mock_add.call_args.args
@@ -125,6 +125,7 @@ async def test_import_statistics_calls_add_external_statistics(hass):
     assert metadata["mean_type"] == StatisticMeanType.ARITHMETIC
     assert metadata["unit_class"] is None
     assert metadata["has_sum"] is False
+    assert "test_entry" in metadata["statistic_id"]
     assert len(stats) == 1
     assert stats[0]["mean"] == 2500.0
 
@@ -137,10 +138,11 @@ async def test_import_statistics_no_unit_sets_none(hass):
     with patch(
         "custom_components.cantera.ha_statistics.async_add_external_statistics"
     ) as mock_add:
-        await import_statistics(hass, readings, {"custom_pid": ""})
+        await import_statistics(hass, readings, {"custom_pid": ""}, "test_entry")
 
     _, metadata, _ = mock_add.call_args.args
     assert metadata["unit_of_measurement"] is None
+    assert "test_entry" in metadata["statistic_id"]
 
 
 async def test_import_statistics_exception_does_not_crash(hass):
@@ -154,7 +156,7 @@ async def test_import_statistics_exception_does_not_crash(hass):
         "custom_components.cantera.ha_statistics.async_add_external_statistics",
         side_effect=RuntimeError("recorder unavailable"),
     ):
-        await import_statistics(hass, readings, {"Engine RPM": "rpm"})
+        await import_statistics(hass, readings, {"Engine RPM": "rpm"}, "test_entry")
 
 
 async def test_import_statistics_multiple_pids(hass):
@@ -169,9 +171,12 @@ async def test_import_statistics_multiple_pids(hass):
     with patch(
         "custom_components.cantera.ha_statistics.async_add_external_statistics"
     ) as mock_add:
-        await import_statistics(hass, readings, pid_units)
+        await import_statistics(hass, readings, pid_units, "test_entry")
 
     assert mock_add.call_count == 2
+    for call in mock_add.call_args_list:
+        _, metadata, _ = call.args
+        assert "test_entry" in metadata["statistic_id"]
 
 
 # ---------------------------------------------------------------------------
@@ -179,21 +184,21 @@ async def test_import_statistics_multiple_pids(hass):
 # ---------------------------------------------------------------------------
 
 def test_build_statistic_ids_formats_correctly():
-    """build_statistic_ids returns domain-prefixed, lower-snake IDs."""
+    """build_statistic_ids returns domain-prefixed, lower-snake IDs scoped to entry."""
     from custom_components.cantera.const import DOMAIN
-    ids = build_statistic_ids(["Engine RPM", "Vehicle Speed"])
-    assert ids == [f"{DOMAIN}:engine_rpm", f"{DOMAIN}:vehicle_speed"]
+    ids = build_statistic_ids(["Engine RPM", "Vehicle Speed"], "entry_1")
+    assert ids == [f"{DOMAIN}_entry_1:engine_rpm", f"{DOMAIN}_entry_1:vehicle_speed"]
 
 
 def test_build_statistic_ids_empty():
-    ids = build_statistic_ids([])
+    ids = build_statistic_ids([], "entry_1")
     assert ids == []
 
 
 def test_build_statistic_ids_already_lowercase():
     from custom_components.cantera.const import DOMAIN
-    ids = build_statistic_ids(["coolant_temp"])
-    assert ids == [f"{DOMAIN}:coolant_temp"]
+    ids = build_statistic_ids(["coolant_temp"], "entry_1")
+    assert ids == [f"{DOMAIN}_entry_1:coolant_temp"]
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +219,7 @@ async def test_import_statistics_uses_thread_for_aggregation(hass):
     ) as mock_thread, patch(
         "custom_components.cantera.ha_statistics.async_add_external_statistics"
     ):
-        await import_statistics(hass, readings, {"Engine RPM": "rpm"})
+        await import_statistics(hass, readings, {"Engine RPM": "rpm"}, "test_entry")
 
     mock_thread.assert_awaited_once_with(aggregate_readings, readings)
 
@@ -238,7 +243,7 @@ async def test_import_statistics_yields_between_pids(hass):
     ), patch(
         "custom_components.cantera.ha_statistics.async_add_external_statistics"
     ):
-        await import_statistics(hass, readings, pid_units)
+        await import_statistics(hass, readings, pid_units, "test_entry")
 
     # One yield per PID
     assert len(sleep_calls) == 2

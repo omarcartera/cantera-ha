@@ -24,9 +24,15 @@ _LOGGER = logging.getLogger(__name__)
 BUCKET_S = HISTORY_BUCKET_MINUTES * 60
 
 
-def build_statistic_ids(pid_names: list[str]) -> list[str]:
-    """Return the external statistic IDs for the given PID display names."""
-    return [f"{DOMAIN}:{name.lower().replace(' ', '_')}" for name in pid_names]
+def build_statistic_ids(pid_names: list[str], entry_id: str = "") -> list[str]:
+    """Return the external statistic IDs for the given PID display names.
+
+    The *entry_id* is embedded in the statistic ID so that multiple CANtera
+    config entries (different vehicles / RPis) do not overwrite each other's
+    historical data.
+    """
+    suffix = f"_{entry_id}" if entry_id else ""
+    return [f"{DOMAIN}{suffix}:{name.lower().replace(' ', '_')}" for name in pid_names]
 
 
 def _bucket_start(ts_ms: int) -> int:
@@ -64,6 +70,7 @@ async def import_statistics(
     hass: HomeAssistant,
     readings: list[dict],
     pid_units: dict[str, str],
+    entry_id: str = "",
 ) -> None:
     """Import historical readings as HA long-term statistics."""
     if not readings:
@@ -75,10 +82,11 @@ async def import_statistics(
     # the SSE loop and backfill run concurrently.
     aggregated = await asyncio.to_thread(aggregate_readings, readings)
 
+    suffix = f"_{entry_id}" if entry_id else ""
     for pid_name, stat_buckets in aggregated.items():
         unit = pid_units.get(pid_name, "")
         unit_class = UNIT_DEVICE_CLASS_MAP.get(unit) if unit else None
-        statistic_id = f"{DOMAIN}:{pid_name.lower().replace(' ', '_')}"
+        statistic_id = f"{DOMAIN}{suffix}:{pid_name.lower().replace(' ', '_')}"
         source = DOMAIN
 
         metadata = StatisticMetaData(

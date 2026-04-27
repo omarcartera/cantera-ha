@@ -104,14 +104,21 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove external statistics when the integration entry is deleted."""
+    """Remove external statistics when the integration entry is deleted.
+
+    Only statistics whose ID is scoped to this config entry are removed.
+    Other entries' historical data is preserved.
+    """
     if not _RECORDER_AVAILABLE:
         return
     try:
         recorder = get_instance(hass)
         all_ids = await async_list_statistic_ids(hass)
+        entry_suffix = f"_{entry.entry_id}"
         cantera_ids = [
-            s["statistic_id"] for s in all_ids if s.get("source") == DOMAIN
+            s["statistic_id"]
+            for s in all_ids
+            if s.get("source") == DOMAIN and entry_suffix in s["statistic_id"]
         ]
         if cantera_ids:
             await recorder.async_add_executor_job(

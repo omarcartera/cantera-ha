@@ -748,7 +748,7 @@ class CanteraCoordinator:
                 )
                 for r in readings:
                     self._pid_units[r["pid"]] = r.get("unit", "")
-                await import_statistics(self._hass, readings, self._pid_units)
+                await import_statistics(self._hass, readings, self._pid_units, self._entry_id)
 
                 last_imported_ts = max(r["ts"] for r in readings)
                 await self._save_last_sync(last_imported_ts)
