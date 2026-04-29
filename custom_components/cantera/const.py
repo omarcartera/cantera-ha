@@ -87,9 +87,9 @@ EXPECTED_API_VERSION_MAJOR = 1
 #             HTTP gzip compression support.
 #   minor 8 — cpu_temp_c, disk_usage_pct, throttled_flags optional fields
 #             in /api/health; new /metrics Prometheus endpoint.
-MIN_API_VERSION_MINOR = 8
-#   minor 5 — wifi_ssid, wifi_rssi_dbm, local_ip optional fields in /api/health.
-#   minor 6 — sync_status field in /api/health; RPi owns live/car_off/syncing.
+#   minor 9 — Expanded Mode 01 PID registry from 128 to 174 entries; new units
+#             (h, kg/h, mg/stroke, count) in SSE obd_reading payloads.
+MIN_API_VERSION_MINOR = 9
 SYNC_STALE_THRESHOLD_S = 30  # seconds before a reading timestamp is considered stale
 # How long car-off condition must persist before sync_status flips to "car_off".
 # This prevents rapid oscillation when the ECU briefly stops responding between
