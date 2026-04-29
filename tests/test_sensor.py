@@ -672,6 +672,27 @@ async def test_async_setup_entry_registers_unique_ids_in_tracking_set(hass, mock
     assert any("sync_status" in uid for uid in uid_set)
 
 
+async def test_async_setup_entry_registers_all_mode01_unique_ids(hass, mock_entry):
+    """Every Mode 01 PID sensor unique_id is registered for stale-entity pruning."""
+    coordinator = CanteraCoordinator(hass, mock_entry)
+    mock_entry.runtime_data = coordinator
+
+    uid_set: set[str] = set()
+    hass.data = {DOMAIN: {mock_entry.entry_id: {"current_unique_ids": uid_set}}}
+
+    await async_setup_entry(hass, mock_entry, MagicMock())
+
+    for name, _unit in MODE01_PIDS:
+        slug = name.lower().replace(" ", "_")
+        expected_uid = f"cantera_{mock_entry.entry_id}_{slug}"
+        assert expected_uid in uid_set, f"Missing unique_id for PID {name!r}"
+
+    for name, _unit in MODE09_PIDS:
+        slug = name.lower().replace(" ", "_")
+        expected_uid = f"cantera_{mock_entry.entry_id}_{slug}"
+        assert expected_uid in uid_set, f"Missing unique_id for Mode 09 PID {name!r}"
+
+
 # ---------------------------------------------------------------------------
 # CanteraSensor.async_added_to_hass (lines 152-161)
 # ---------------------------------------------------------------------------
