@@ -65,6 +65,24 @@ bump_version() {
     esac
 }
 
+generate_changelog() {
+    local prev_tag="$1"
+    local out_file="$2"
+    if [[ -n "$prev_tag" ]] && git rev-parse "$prev_tag" &>/dev/null; then
+        {
+            echo "Changes since ${prev_tag}:"
+            echo ""
+            git log --pretty=format:"- %s" "${prev_tag}..HEAD"
+        } > "$out_file"
+    else
+        {
+            echo "Changes:"
+            echo ""
+            git log --pretty=format:"- %s"
+        } > "$out_file"
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
@@ -184,12 +202,19 @@ info "Pushed branch and tag"
 # Create GitHub release
 # ---------------------------------------------------------------------------
 
+step "Generating changelog"
+CHANGELOG_FILE="$(mktemp)"
+generate_changelog "v${CURRENT_VERSION}" "$CHANGELOG_FILE"
+info "Changelog written to ${CHANGELOG_FILE}"
+
 step "Creating GitHub release ${TAG}"
 gh release create "$TAG" \
     --title "Release ${NEXT_VERSION}" \
-    --generate-notes \
+    --notes-file "$CHANGELOG_FILE" \
     --latest \
     --target "$BRANCH"
+
+rm -f "$CHANGELOG_FILE"
 
 echo
 echo "✅  Release ${NEXT_VERSION} is live!"
